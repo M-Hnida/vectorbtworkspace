@@ -2,6 +2,7 @@
 from typing import Dict, Any
 import pandas as pd
 from core.base import BaseStrategy
+from core.strategies.lti_signals import generate_signals
 
 
 class LTIStrategy(BaseStrategy):
@@ -21,7 +22,7 @@ class LTIStrategy(BaseStrategy):
             'rsi_period': [14, 21, 28]
         }
     
-    def generate_signals(self, data: pd.DataFrame, **kwargs) -> Dict[str, pd.DataFrame]:
+    def generate_signals(self, data: Dict[str, pd.DataFrame], **kwargs) -> Dict[str, pd.DataFrame]:
         """Generate entry/exit signals for the LTI strategy."""
         param_grid = kwargs.get('param_grid', self._get_default_param_grid())
         timeframe = kwargs.get('timeframe', self.default_timeframe)

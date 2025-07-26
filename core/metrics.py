@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 import vectorbt as vbt
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from .indicators import get_scalar
 
 # Constants for metric calculations
@@ -12,50 +12,44 @@ VAR_95_PERCENTILE = 5
 VAR_99_PERCENTILE = 1
 
 
+def safe_value(value: Union[float, np.ndarray], default: float = 0) -> float:
+    """Return the scalar value or default if not finite."""
+    scalar = get_scalar(value) if not np.isscalar(value) else value
+    return scalar if np.isfinite(scalar) else default
+
+
+def safe_divide(numerator: float, denominator: float, default: float = 0) -> float:
+    """Safely divide two numbers, returning default if denominator is zero or result is not finite."""
+    if denominator == 0 or not np.isfinite(numerator) or not np.isfinite(denominator):
+        return default
+    return numerator / denominator
+
+
 def calc_metrics(portfolio: vbt.Portfolio, name: str = "Portfolio") -> Dict[str, Any]:
     """Calculate comprehensive portfolio metrics."""
     metrics = {}
 
-    # Get returns and check volatility
-    returns = portfolio.returns()
+    # Get portfolio stats
+    stats = portfolio.stats()
+    trades_stats = portfolio.trades.stats()
 
-    # For multi-column portfolios, returns() aggregates, so we check the result
-    if isinstance(returns, pd.DataFrame):
-        returns = returns.iloc[:, 0]
-
-    vol = returns.std() if len(returns) > 1 else 0
-    if vol < 1e-6:
-        print(f"⚠️ Very low volatility ({vol:.2e}) for {name} - metrics adjusted to 0")
-        metrics['sharpe'] = 0
-        metrics['calmar'] = 0
-    else:
-        # stats() called on a multi-column object will aggregate.
-        # This is the desired behavior for 'test' and 'full' sets.
-        sharpe = get_scalar(portfolio.sharpe_ratio())
-        metrics['sharpe'] = 0 if not np.isfinite(sharpe) else sharpe
-        calmar = get_scalar(portfolio.calmar_ratio())
-        metrics['calmar'] = 0 if not np.isfinite(calmar) else calmar
-
-    # Basic performance metrics
-    metrics['return'] = get_scalar(portfolio.total_return()) * PERCENTAGE_MULTIPLIER
-    metrics['max_dd'] = get_scalar(portfolio.max_drawdown()) * PERCENTAGE_MULTIPLIER
-
-    # Trade analysis
-    trades = portfolio.trades.records_readable
-    metrics['trades'] = len(trades)
-
+    # Basic performance and risk metrics (directly from portfolio)
+    metrics['return'] = safe_value(stats['Total Return [%]'])
+    metrics['max_dd'] = safe_value(stats['Max Drawdown [%]'])
+    metrics['sharpe'] = safe_value(portfolio.sharpe_ratio())
+    metrics['calmar'] = safe_value(portfolio.calmar_ratio())
+    
+    # Trade metrics (from trades stats)
+    metrics['trades'] = stats['Total Trades']
     if metrics['trades'] > 0:
-        wins = trades[trades['PnL'] > 0]
-        losses = trades[trades['PnL'] < 0]
-
-        metrics['win_rate'] = len(wins) / metrics['trades'] * PERCENTAGE_MULTIPLIER
-        metrics['profit_factor'] = abs(wins['PnL'].sum() / losses['PnL'].sum()) if len(losses) > 0 and wins['PnL'].sum() > 0 else np.inf
-        metrics['profit_factor'] = 0 if not np.isfinite(metrics['profit_factor']) else metrics['profit_factor']
-
-        metrics['avg_win'] = wins['PnL'].mean() if len(wins) > 0 else 0
-        metrics['avg_loss'] = losses['PnL'].mean() if len(losses) > 0 else 0
-        metrics['win_loss_ratio'] = abs(metrics['avg_win'] / metrics['avg_loss']) if metrics['avg_loss'] != 0 else np.inf
-        metrics['win_loss_ratio'] = 0 if not np.isfinite(metrics['win_loss_ratio']) else metrics['win_loss_ratio']
+        metrics['win_rate'] = safe_value(trades_stats['Win Rate [%]'])
+        metrics['profit_factor'] = safe_value(trades_stats['Profit Factor'])
+        metrics['avg_win'] = safe_value(trades_stats['Avg Winning Trade [%]'])
+        metrics['avg_loss'] = safe_value(trades_stats['Avg Losing Trade [%]'])
+        metrics['win_loss_ratio'] = safe_divide(
+            abs(metrics['avg_win']), 
+            abs(metrics['avg_loss'])
+        )
     else:
         metrics.update({
             'win_rate': 0, 'profit_factor': 0, 'avg_win': 0,
@@ -63,26 +57,12 @@ def calc_metrics(portfolio: vbt.Portfolio, name: str = "Portfolio") -> Dict[str,
         })
 
     # Risk metrics
-    if len(returns) > 0:
-        metrics['volatility'] = returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR) * PERCENTAGE_MULTIPLIER
-        metrics['volatility'] = 0 if not np.isfinite(metrics['volatility']) else metrics['volatility']
-
-        metrics['var_95'] = np.percentile(returns, VAR_95_PERCENTILE) * PERCENTAGE_MULTIPLIER
-        metrics['var_95'] = 0 if not np.isfinite(metrics['var_95']) else metrics['var_95']
-
-        metrics['var_99'] = np.percentile(returns, VAR_99_PERCENTILE) * PERCENTAGE_MULTIPLIER
-        metrics['var_99'] = 0 if not np.isfinite(metrics['var_99']) else metrics['var_99']
-
-        metrics['cvar_95'] = returns[returns <= np.percentile(returns, VAR_95_PERCENTILE)].mean() * PERCENTAGE_MULTIPLIER
-        metrics['cvar_95'] = 0 if not np.isfinite(metrics['cvar_95']) else metrics['cvar_95']
-
-        downside_vol = returns[returns < 0].std() * np.sqrt(TRADING_DAYS_PER_YEAR) * PERCENTAGE_MULTIPLIER if len(returns[returns < 0]) > 0 else 0
-        metrics['downside_vol'] = 0 if not np.isfinite(downside_vol) else downside_vol
-    else:
-        metrics.update({
-            'volatility': 0, 'var_95': 0, 'var_99': 0,
-            'cvar_95': 0, 'downside_vol': 0
-        })
+    returns_stats = portfolio.returns_stats()
+    metrics['volatility'] = safe_value(returns_stats.get('Volatility [%]', 0))
+    metrics['var_95'] = safe_value(portfolio.value_at_risk(cutoff=VAR_95_PERCENTILE) * PERCENTAGE_MULTIPLIER)
+    metrics['var_99'] = safe_value(portfolio.value_at_risk(cutoff=VAR_99_PERCENTILE) * PERCENTAGE_MULTIPLIER)
+    metrics['cvar_95'] = safe_value(portfolio.value_at_risk(cutoff=VAR_95_PERCENTILE, var_type='cvar') * PERCENTAGE_MULTIPLIER)
+    metrics['downside_vol'] = safe_value(returns_stats.get('Downside Volatility [%]', 0))
 
     return metrics
 

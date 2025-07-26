@@ -1,12 +1,29 @@
 """Base classes for the trading framework."""
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Tuple, Any, Iterator
 import pandas as pd
-import vectorbt as vbt
+import itertools
 
 
 class BaseStrategy(ABC):
     """Abstract base class for all trading strategies."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize strategy with configuration."""
+        self.config = config
+        self.name = "BaseStrategy"
+        self.description = "Base strategy class"
+        self.default_timeframe = self.config.get('default_timeframe', '1h')
+        self.default_parameters = {}  # Override in subclass
+        
+    def _get_default_param_grid(self) -> List[Tuple]:
+        """Convert default parameters dict to parameter grid."""
+        # Get all possible values for each parameter
+        param_values = list(self.default_parameters.values())
+        
+        # Generate all combinations
+        import itertools
+        return list(itertools.product(*param_values))
     
     def __init__(self, config: Dict[str, Any]):
         self.config = self._validate_config(config)

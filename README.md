@@ -1,18 +1,5 @@
 # Trading Strategy Framework
-
-A scalable and modular framework for backtesting trading strategies with comprehensive analysis tools.
-
-## 🏗️ Architecture
-
-### Core Components
-- **`core/io.py`** - Data loading and management (MarketData class)
-- **`core/backtest.py`** - Portfolio backtesting engine
-- **`core/optimizer.py`** - Grid search parameter optimization
-- **`core/metrics.py`** - Performance metrics calculation
-- **`core/plotting.py`** - Visualization and dashboard generation
-- **`core/indicators.py`** - Technical indicator calculations
-- **`core/monte_carlo.py`** - Statistical validation via permutation tests
-- **`core/walkforward.py`** - Walk-forward analysis for robustness testing
+This shi spaghetti code ngl
 
 ### Strategy Implementation
 - **`core/strategies/`** - Strategy signal generation modules
@@ -26,13 +13,6 @@ A scalable and modular framework for backtesting trading strategies with compreh
   - `lti.yaml` - LTI strategy parameters
   - `orb.yaml` - ORB strategy parameters
 
-## 🚀 Usage
-
-### Running a Strategy
-```bash
-# Edit runner.py to set STRATEGY_NAME
-python runner.py
-```
 
 ### Available Strategies
 1. **Momentum** - Volatility-based momentum strategy

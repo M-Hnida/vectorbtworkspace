@@ -1,8 +1,8 @@
 import vectorbt as vbt
 
 from .indicators import timeframe_to_pandas_freq
-from .io import MarketData
 from .portfolio import PortfolioManager
+from .data_loader import MarketData
 
 
 
