@@ -3,7 +3,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from typing import Dict, Any
-import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import vectorbt as vbt
@@ -204,3 +203,5 @@ class TradingVisualizer:
         except Exception as e:
             print(f"⚠️ Stats summary failed: {e}")
             return {}
+
+

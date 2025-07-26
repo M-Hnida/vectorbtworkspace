@@ -1,39 +1,67 @@
+from typing import Dict
+
+import pandas as pd
 import vectorbt as vbt
-
-from .indicators import timeframe_to_pandas_freq
-from .portfolio import PortfolioManager
-from .data_loader import MarketData
-
+from core.data_loader import MarketData
+from core.indicators import timeframe_to_pandas_freq
+from .base import Signals
 
 
 def run_backtest(
-    data: MarketData,
-    signals: dict,
-    portfolio_config: dict,
-    timeframe: str,
-) -> vbt.Portfolio:
-    """Run a vectorized backtest with the given signals and portfolio configuration."""
+    data: MarketData,  # symbol -> timeframe -> DataFrame
+    signals: Dict[str, Dict[str, Signals]],
+) -> Dict[str, Dict[str, vbt.Portfolio]]:
+    """
+    Run vectorized backtests on all given symbols and timeframes.
     
-    # Create portfolio manager
-    portfolio_manager = PortfolioManager(data.symbols, portfolio_config)
+    Args:
+        data: MarketData object with structure {symbol: {timeframe: DataFrame}}
+        
+        portfolio_config: Portfolio configuration : fees slippage init_cash
+        timeframe: Default timeframe to use
+    Returns:
+        Dict with structure {symbol: {timeframe: Portfolio}}
+    """
     
-    # Process signals
-    entries = signals['entries']
-    exits = signals['exits']
-    short_entries = signals.get('short_entries')
-    short_exits = signals.get('short_exits')
+    results = {}
     
-    # Create portfolio using manager
-    portfolio = portfolio_manager.create_portfolio(
-        data=data.get_all(timeframe),
-        entries=entries,
-        exits=exits, 
-        short_entries=short_entries,
-        short_exits=short_exits,
-        freq=timeframe_to_pandas_freq(timeframe)
-    )
+    for symbol in data.symbols:
+        results[symbol] = {}  # ✅ Initialiser le dict du symbole
+        
+        symbol_timeframes = data.get_symbol(symbol)
+        
+        for tf, df in symbol_timeframes.items():
+            # Obtenir les signaux
+            try:
+                symbol_signals :Signals = signals[symbol][tf]
+                entries = symbol_signals.entries
+                exits = symbol_signals.exits
+                short_entries = symbol_signals.short_entries
+                short_exits = symbol_signals.short_exits
+            except AttributeError as e:
+                print(f"Warning: No signals found for {symbol} {tf} fk ass niga: {e}")
+                continue
+
+            try:
+                portfolio = vbt.Portfolio.from_signals(
+                    close=df['close'],
+                    init_cash=50000,
+                    entries=entries,
+                    exits=exits, 
+                    short_entries=short_entries,
+                    short_exits=short_exits,
+                    freq=timeframe_to_pandas_freq(tf),
+                    fees=0.0004,
+                    slippage=0.001,
+                )
+                
+                results[symbol][tf] = portfolio
+                
+            except Exception as e:
+                print(f"Error running backtest for {symbol} {tf}: {str(e)}")
+                results[symbol][tf] = None
     
-    return portfolio
+    return results
     
 
 if __name__ == '__main__':

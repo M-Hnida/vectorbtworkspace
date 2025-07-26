@@ -13,23 +13,35 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from core.config import ConfigManager
-from core.trading_system import TradingSystem
+from core.config import ConfigManager, StrategyConfig
 from core.base import BaseStrategy
 from core.data_loader import CSVDataLoader
 
 
-def get_strategy_class(strategy_name: str) -> Type[BaseStrategy]:
-    """Dynamically import and return the strategy class."""
+def get_strategy_class(strategy_name: str, strategy_config: StrategyConfig) -> Type[BaseStrategy]:
+    """Dynamically import and return the strategy class.
+    
+    Args:
+        strategy_name: Name of the strategy (used for module import)
+        strategy_config: Strategy configuration containing class name information
+    """
     try:
-        # Convert strategy name to class name (e.g., 'orb' -> 'ORBStrategy')
-        class_name = ''.join(word.capitalize() for word in strategy_name.split('_')) + 'Strategy'
-        module_name = f'core.strategies.{strategy_name}_strategy'
+        # Get class name from config or use default CamelCase
+        class_name = strategy_config.get_class_name()
+            
+        # Determine module name based on strategy name
+        module_name = f'core.strategies.{strategy_name.lower()}_strategy'
         
-        print(f"\n� Looking for strategy class '{class_name}' in module '{module_name}'")
+        print(f"\n🔍 Looking for strategy class '{class_name}' in module '{module_name}'")
         
-        # Import the strategy module directly
-        module = importlib.import_module(module_name)
+        try:
+            # Import the strategy module directly
+            module = importlib.import_module(module_name)
+        except ImportError:
+            # Try without _strategy suffix as fallback
+            alt_module_name = f'core.strategies.{strategy_name.lower()}'
+            print(f"⚠️ Module not found, trying alternative: {alt_module_name}")
+            module = importlib.import_module(alt_module_name)
         
         if hasattr(module, class_name):
             strategy_class = getattr(module, class_name)
@@ -63,11 +75,11 @@ def run_strategy(strategy_name: str) -> Dict[str, Any]:
         trading_system = TradingSystem(config_manager, data_loader=data_loader)
 
         # Dynamically load and create strategy
-        strategy_class = get_strategy_class(strategy_name)
+        strategy_class = get_strategy_class(strategy_name, strategy_config)
         strategy = strategy_class(strategy_config.__dict__)
 
         # Get symbols from config
-        symbols = strategy_config.data_requirements.get('symbols', ['EURUSD'])
+        symbols = strategy_config.market_data.symbols if strategy_config.market_data.symbols else None
 
         # Run complete strategy analysis
         results = trading_system.run_strategy(

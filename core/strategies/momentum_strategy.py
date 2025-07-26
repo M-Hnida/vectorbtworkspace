@@ -1,6 +1,7 @@
 """Momentum strategy implementation."""
 from typing import Dict, Any
 import pandas as pd
+import vectorbt as vbt
 from core.base import BaseStrategy
 
 
@@ -21,8 +22,15 @@ class MomentumStrategy(BaseStrategy):
             'higher_wma_window': [50, 100, 200]
         }
     
-    def generate_signals(self, data: Dict[str, pd.DataFrame], **kwargs) -> Dict[str, pd.DataFrame]:
+    def generate_signals(self, data: pd.DataFrame) -> Dict[str, pd.Series]:
         """Generate entry/exit signals for the momentum strategy."""
-        
+        # Feature Generation
+        volatility = data['close'].rolling(window=self.parameters['volatility_window']).std()
+        volatility_momentum = volatility.pct_change(periods=self.parameters['volatility_momentum_window'])
+        higher_wma = vbt.ta.wma(data['close'], window=self.parameters['higher_wma_window'])
 
-        
+        # Signal Generation
+        entries = (volatility_momentum > self.parameters['volatility_momentum_threshold']) & (data['close'] > higher_wma.iloc[-1])
+        exits = (volatility_momentum < -self.parameters['volatility_momentum_threshold']) | (data['close'] < higher_wma.iloc[-1])
+
+        return {'entries': entries, 'exits': exits}

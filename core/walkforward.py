@@ -3,7 +3,6 @@ from typing import Dict, List, Any, Tuple
 import pandas as pd
 import numpy as np
 from .base import BaseStrategy
-from .portfolio import PortfolioManager
 from .config import StrategyConfig
 
 
@@ -87,8 +86,6 @@ class WalkForwardAnalyzer:
             entries, exits = self.strategy.generate_signals(test_data)
             
             # Create portfolio
-            portfolio_manager = PortfolioManager([self.strategy.name], self.config.portfolio)
-            portfolio = portfolio_manager.create_portfolio(test_data, entries, exits)
             
             # Calculate metrics
             returns = portfolio.returns()

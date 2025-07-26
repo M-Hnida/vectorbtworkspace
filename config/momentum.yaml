@@ -1,13 +1,15 @@
+class_name: Momentum
+
+market_data:
+  symbols: ['EURUSD']  
+  timeframes: ['1h', '4h']  # Timeframes à charger (le système va chercher EURUSD_4H_2009-2025.csv automatiquement)
+
 portfolio:
   cash: 100000
   fees: 0.001
   slippage: 0.001
   risk_pct: 0.01
   vol_adjust: true
-
-market_data:
-  symbols: ['EURUSD']  
-  timeframes: ['1h', '4h']  # Timeframes à charger (le système va chercher EURUSD_4H_2009-2025.csv automatiquement)
 
 indicators:
   volatility_momentum_window: 5

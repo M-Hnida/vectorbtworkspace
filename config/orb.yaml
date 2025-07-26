@@ -1,6 +1,7 @@
 # ============================================================
 # Configuration for the Opening Range Breakout (ORB) Strategy
 # ============================================================
+class_name: ORBStrategy
 
 market_data:
   # List of symbols to backtest on

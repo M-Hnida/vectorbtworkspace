@@ -4,9 +4,8 @@ import pandas as pd
 import numpy as np
 from joblib import Parallel, delayed
 from .base import BaseStrategy
-from .portfolio import PortfolioManager
 from .config import StrategyConfig
-
+from .backtest import run_backtest
 
 class MonteCarloAnalyzer:
     """Performs Monte Carlo permutation testing for statistical validation."""
@@ -104,9 +103,7 @@ class MonteCarloAnalyzer:
                 # Generate signals
                 entries, exits = self.strategy.generate_signals(test_data)
                 
-                # Create portfolio
-                portfolio_manager = PortfolioManager([self.strategy.name], self.config.portfolio)
-                portfolio = portfolio_manager.create_portfolio(test_data, entries, exits)
+                portfolio = run_backtest(test_data, entries, exits)
                 
                 # Calculate metrics
                 metrics = self._calculate_portfolio_metrics(portfolio)

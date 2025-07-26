@@ -1,11 +1,12 @@
 """Parameter optimization for trading strategies."""
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Any
 import pandas as pd
 import numpy as np
 from itertools import product
 import vectorbt as vbt
+
+from core.backtest import run_backtest
 from .base import BaseStrategy
-from .portfolio import PortfolioManager
 from .config import StrategyConfig
 
 
@@ -97,8 +98,7 @@ class ParameterOptimizer:
             entries, exits = self.strategy.generate_signals(data)
             
             # Create portfolio
-            portfolio_manager = PortfolioManager([self.strategy.name], self.config.portfolio)
-            portfolio = portfolio_manager.create_portfolio(data, entries, exits)
+            portfolio = run_backtest(data, entries, exits)
             
             # Calculate metrics
             metrics = self._calculate_optimization_metrics(portfolio)

@@ -2,10 +2,11 @@
 import os
 import re
 import glob
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union,Iterator
 import pandas as pd
 from .base import BaseDataLoader
 
+REQUIRED_COLS = ['open', 'high', 'low', 'close']
 
 class DataValidator:
     """Handles data validation and cleaning."""
@@ -13,9 +14,8 @@ class DataValidator:
     @staticmethod
     def validate_ohlc_columns(df: pd.DataFrame) -> bool:
         """Check if DataFrame has required OHLC columns."""
-        required_cols = ['open', 'high', 'low', 'close']
-        return all(col in df.columns for col in required_cols)
-    
+        return all(col in df.columns for col in REQUIRED_COLS)
+
     @staticmethod
     def detect_datetime_column(df: pd.DataFrame) -> Optional[str]:
         """Intelligently detect datetime column."""
@@ -25,25 +25,18 @@ class DataValidator:
         return df.columns[0] if len(df.columns) > 0 else None
     
     @staticmethod
-    def validate_datetime_format(df: pd.DataFrame, datetime_col: str) -> bool:
-        """Validate datetime format."""
-        try:
-            pd.to_datetime(df[datetime_col].iloc[0])
-            return True
-        except:
-            return False
-
+    def validate_datetime_format(df, col):
+        """Validate that the first value of a datetime column is a proper datetime."""
+        return col in df and not df[col].empty and pd.to_datetime(df[col].iloc[0], errors='coerce') is not pd.NaT
 
 class DataCleaner:
     """Handles data cleaning operations."""
     
-    
     @staticmethod
     def handle_missing_columns(df: pd.DataFrame) -> pd.DataFrame:
         """Handle missing columns gracefully."""
-        required_cols = ['open', 'high', 'low', 'close']
-        available_cols = [col for col in required_cols if col in df.columns]
-        
+        available_cols = [col for col in REQUIRED_COLS if col in df.columns]
+        print(f"📊 Available OHLC columns: {available_cols}")
         if not available_cols:
             raise ValueError("No OHLC columns found in data")
         
@@ -76,9 +69,42 @@ class DataCleaner:
 
 class MarketData:
     """Encapsulates multi-asset, multi-timeframe OHLC data."""
-    
-    def __init__(self, raw_data: Dict[str, Dict[str, pd.DataFrame]]):
-        self._data = raw_data
+
+    def __init__(
+        self,
+        raw_data: Union[
+            pd.DataFrame,
+            Dict[str, pd.DataFrame],
+            Dict[str, Dict[str, pd.DataFrame]]
+        ],
+        default_symbol: str = "SYMBOL",
+        default_timeframe: str = "1h"
+    ):
+        """
+        Args:
+            raw_data: pd.DataFrame or {symbol: df} or {symbol: {timeframe: df}}
+        """
+        self._data: Dict[str, Dict[str, pd.DataFrame]]
+
+        if isinstance(raw_data, pd.DataFrame):
+            self._data = {default_symbol: {default_timeframe: raw_data}}
+
+        elif isinstance(raw_data, dict):
+            if all(isinstance(v, pd.DataFrame) for v in raw_data.values()):
+                # It's {symbol: df}, assume default_timeframe
+                self._data = {
+                    symbol: {default_timeframe: df}
+                    for symbol, df in raw_data.items()
+                }
+            elif all(
+                isinstance(subdict, dict) and
+                all(isinstance(df, pd.DataFrame) for df in subdict.values())
+                for subdict in raw_data.values()
+            ):
+                # It's already nested: {symbol: {timeframe: df}}
+                self._data = raw_data  # type: ignore
+            else:
+                raise TypeError("Invalid raw_data structure.")
 
     @property
     def symbols(self) -> list[str]:
@@ -90,11 +116,11 @@ class MarketData:
         """Get list of all available timeframes across all symbols."""
         return list({tf for asset in self._data.values() for tf in asset})
 
-    def get(self, symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
+    def get_df(self, symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
         """Get OHLC DataFrame for a specific symbol and timeframe."""
         return self._data.get(symbol, {}).get(timeframe, None)
 
-    def get_timeframe(self, timeframe: str) -> Dict[str, pd.DataFrame]:
+    def get_data_timeframe(self, timeframe: str) -> Dict[str, pd.DataFrame]:
         """Get all symbols' data for a given timeframe."""
         return {
             symbol: tfs[timeframe]
@@ -103,10 +129,10 @@ class MarketData:
         }
 
     def get_symbol(self, symbol: str) -> Dict[str, pd.DataFrame]:
-        """Get all timeframes for a specific symbol."""
+        """Get data from all timeframes for a specific symbol."""
         return self._data.get(symbol, {})
 
-    def get_all(self) -> Dict[str, Dict[str, pd.DataFrame]]:
+    def get_dict(self) -> Dict[str, Dict[str, pd.DataFrame]]:
         """Return raw nested data structure."""
         return self._data
 
@@ -119,7 +145,7 @@ class MarketData:
     def __len__(self) -> int:
         return len(self._data)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._data)
 
     def __repr__(self) -> str:
@@ -135,36 +161,51 @@ class MarketData:
         harmonized_dict = CSVDataLoader.harmonize_timeframes(self._data)
         return MarketData(harmonized_dict)
 
-
 class CSVDataLoader(BaseDataLoader):
     """Concrete implementation for CSV data loading."""
-    
-    def __init__(self, csv_directory: str = 'data'):
+
+    def __init__(self, csv_directory: str = 'data', cache_enabled: bool = True, cache_dir: str = 'cache'):
         self.csv_directory = csv_directory
         self.timeframe_map = {
-            '1h': '1H', '4h': '4H', '1d': '1D', 
+            '1h': '1H', '4h': '4H', '1d': '1D',
             '15m': '15M', '30m': '30M'
         }
         self.validator = DataValidator()
         self.cleaner = DataCleaner()
+        self.cache_enabled = cache_enabled
+        self.cache_dir = cache_dir
+        if self.cache_enabled and not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
     
     def load(self, symbol: str, interval: str) -> pd.DataFrame:
-        """Load and process CSV data with robust error handling."""
+        """Load and process CSV data with robust error handling and caching."""
+        cache_key = f"{symbol}_{interval}.pkl"
+        cache_path = os.path.join(self.cache_dir, cache_key)
+
+        if self.cache_enabled and os.path.exists(cache_path):
+            print(f"Read from cache: {cache_path}")
+            return pd.read_pickle(cache_path)
+
         try:
             file_path = self._find_csv_file(symbol, interval)
             if not file_path:
                 print(f"❌ No CSV file found for {symbol} ({interval})")
                 return pd.DataFrame()
-            
+
             print(f"📂 Loading {os.path.basename(file_path)}")
-            
+
             df = self._load_csv_with_multiple_strategies(file_path)
             if df.empty:
                 return df
-            
+
             df = self._process_dataframe(df)
+
+            if self.cache_enabled:
+                df.to_pickle(cache_path)
+                print(f"Saved to cache: {cache_path}")
+
             return df
-            
+
         except Exception as e:
             print(f"❌ Error loading {symbol} ({interval}): {e}")
             return pd.DataFrame()
@@ -281,47 +322,41 @@ class CSVDataLoader(BaseDataLoader):
         df = self.cleaner.sort_and_validate_index(df)
         
         # Ensure required columns exist
-        required_cols = ['open', 'high', 'low', 'close']
         if not self.validator.validate_ohlc_columns(df):
             print(f"⚠️ Missing required OHLC columns. Available: {list(df.columns)}")
-            print(f"⚠️ Required: {required_cols}")
+            print(f"⚠️ Required: {REQUIRED_COLS}")
             # Try to map common column variations
             df = self._map_column_variations(df)
         
         if not self.validator.validate_ohlc_columns(df):
             raise ValueError(f"Missing required OHLC columns. Available: {list(df.columns)}")
         
-        return df[required_cols + [c for c in df.columns if c not in required_cols]]
+        return df[REQUIRED_COLS + [c for c in df.columns if c not in REQUIRED_COLS]]
     
     def _map_column_variations(self, df: pd.DataFrame) -> pd.DataFrame:
         """Map common column name variations to standard OHLC names."""
         column_mapping = {
-            # Common variations
             'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume',
             'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume',
             'OPEN': 'open', 'HIGH': 'high', 'LOW': 'low', 'CLOSE': 'close', 'VOLUME': 'volume',
-            # Numbered columns (for headerless CSV)
             '0': 'open', '1': 'high', '2': 'low', '3': 'close', '4': 'volume'
         }
-        
-        # Apply mapping
+
         df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
-        
-        # If we still don't have OHLC columns, try positional mapping
+
+        # Essaye une fois le mapping positionnel si toujours pas valide
         if not self.validator.validate_ohlc_columns(df):
             cols = list(df.columns)
             if len(cols) >= 4:
-                # Assume first 4 columns are OHLC
                 new_names = ['open', 'high', 'low', 'close']
                 if len(cols) >= 5:
                     new_names.append('volume')
-                
-                # Create mapping for existing columns
-                mapping = {cols[i]: new_names[i] for i in range(min(len(cols), len(new_names)))}
+                mapping = {cols[i]: new_names[i] for i in range(len(new_names))}
                 df = df.rename(columns=mapping)
                 print(f"📊 Applied positional mapping: {mapping}")
-        
+
         return df
+
 
     @staticmethod
     def train_test_split(data: Dict[str, Dict[str, pd.DataFrame]], split_ratio: float, timeframe: str) -> Tuple[Dict, Dict]:

@@ -2,6 +2,9 @@
 # Configuration for the Logical Trading Indicator (LTI)
 # ============================================================
 
+
+class_name: 'LTI'
+
 market_data:
   # List of symbols to backtest on
   symbols:

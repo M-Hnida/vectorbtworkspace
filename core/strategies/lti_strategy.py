@@ -2,11 +2,9 @@
 from typing import Dict, Any
 import pandas as pd
 from core.base import BaseStrategy
-from core.strategies.lti_signals import generate_signals
-
 
 class LTIStrategy(BaseStrategy):
-    """Logical Trading Indicator strategy."""
+    """Logical Trading Indicator (LTI) strategy."""
     
     def __init__(self, config: Dict[str, Any]):
         """Initialize strategy with configuration."""

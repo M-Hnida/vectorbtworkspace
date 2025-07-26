@@ -16,8 +16,8 @@ class OverfittingAnalyzer:
         
         try:
             # Calculate metrics for both periods
-            train_metrics = metrics.calc_metrics(train_portfolio, "Train")
-            test_metrics = metrics.calc_metrics(test_portfolio, "Test")
+            train_metrics = metrics.calc_metrics(train_portfolio)
+            test_metrics = metrics.calc_metrics(test_portfolio)
             
             # Compare key metrics
             sharpe_diff = train_metrics['sharpe'] - test_metrics['sharpe']
@@ -108,7 +108,10 @@ class MultiAssetAnalyzer:
             # Calculate returns for each asset
             returns_data = {}
             for symbol in symbols:
-                if symbol in data.columns:
+                # Extract the 'close' price for each symbol from the MultiIndex DataFrame
+                if (symbol, 'close') in data.columns:
+                    returns_data[symbol] = data[(symbol, 'close')].pct_change().dropna()
+                elif symbol in data.columns: # Fallback for single-level index (e.g., single asset data)
                     returns_data[symbol] = data[symbol].pct_change().dropna()
             
             if len(returns_data) < 2:

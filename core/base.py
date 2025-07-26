@@ -1,44 +1,45 @@
 """Base classes for the trading framework."""
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Any, Iterator
+from typing import Dict, List, Any
 import pandas as pd
-import itertools
+from dataclasses import dataclass
+import pandas as pd
 
+@dataclass
+class Signals:
+    """
+    Contient les signaux de trading pour un actif et une timeframe donnée.
+
+    Attributes:
+        entries (pd.Series): Signaux d'entrée long (booléen).
+        exits (pd.Series): Signaux de sortie long (booléen).
+        short_entries (pd.Series): Signaux d'entrée short (booléen).
+        short_exits (pd.Series): Signaux de sortie short (booléen).
+    """
+    entries: pd.Series
+    exits: pd.Series
+    short_entries: pd.Series
+    short_exits: pd.Series
 
 class BaseStrategy(ABC):
     """Abstract base class for all trading strategies."""
     
     def __init__(self, config: Dict[str, Any]):
         """Initialize strategy with configuration."""
-        self.config = config
-        self.name = "BaseStrategy"
-        self.description = "Base strategy class"
-        self.default_timeframe = self.config.get('default_timeframe', '1h')
-        self.default_parameters = {}  # Override in subclass
-        
-    def _get_default_param_grid(self) -> List[Tuple]:
-        """Convert default parameters dict to parameter grid."""
-        # Get all possible values for each parameter
-        param_values = list(self.default_parameters.values())
-        
-        # Generate all combinations
-        import itertools
-        return list(itertools.product(*param_values))
-    
-    def __init__(self, config: Dict[str, Any]):
         self.config = self._validate_config(config)
         self.parameters = self.config.get('parameters', {})
         self.name = self.config.get('name', self.__class__.__name__)
     
     @abstractmethod
-    def generate_signals(self, data: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+    def generate_signals(self, data: pd.DataFrame) -> Signals:
         """Generate entry and exit signals.
-        
+
         Args:
             data: OHLC data with datetime index
-            
+            **kwargs: Additional keyword arguments for strategy parameters
+
         Returns:
-            Tuple of (entries, exits) as boolean Series
+            Dictionary containing signal Series (e.g., 'entries', 'exits', 'long_entries', etc.)
         """
         pass
     

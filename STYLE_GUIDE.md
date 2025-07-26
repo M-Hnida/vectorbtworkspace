@@ -1,9 +1,23 @@
 # Code Style Guide
 
-## 🎯 **Philosophy**
-Write code that is **concise yet clear**. Use full words when possible, but avoid unnecessarily long names. Prioritize readability and consistency over brevity.
+## 🎯 Philosophie
+Écrire du code qui est à la fois **concis et clair**. Utiliser des mots complets quand c'est possible, mais éviter les noms inutilement longs. Prioriser la lisibilité et la cohérence.
 
-## 📋 **Naming Conventions**
+## 📋 Conventions de Nommage
+
+### Classes de Stratégie
+
+1. **Acronymes** : Utiliser des majuscules pour les acronymes
+   ```python
+   class ORBStrategy(BaseStrategy):  # Opening Range Breakout
+   class LTIStrategy(BaseStrategy):  # Logical Trading Indicator
+   ```
+
+2. **Mots Réguliers** : Utiliser le CamelCase standard
+   ```python
+   class MomentumStrategy(BaseStrategy)
+   class TrendFollowingStrategy(BaseStrategy)
+   ```
 
 ### **Functions**
 - **✅ DO**: Use verb-noun patterns that clearly describe the action

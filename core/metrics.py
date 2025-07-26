@@ -8,8 +8,8 @@ from .indicators import get_scalar
 # Constants for metric calculations
 TRADING_DAYS_PER_YEAR = 252
 PERCENTAGE_MULTIPLIER = 100
-VAR_95_PERCENTILE = 5
-VAR_99_PERCENTILE = 1
+VAR_95_PERCENTILE = 95
+VAR_99_PERCENTILE = 99
 
 
 def safe_value(value: Union[float, np.ndarray], default: float = 0) -> float:
@@ -25,7 +25,7 @@ def safe_divide(numerator: float, denominator: float, default: float = 0) -> flo
     return numerator / denominator
 
 
-def calc_metrics(portfolio: vbt.Portfolio, name: str = "Portfolio") -> Dict[str, Any]:
+def calc_metrics(portfolio: vbt.Portfolio) -> Dict[str, Any]:
     """Calculate comprehensive portfolio metrics."""
     metrics = {}
 
