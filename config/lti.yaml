@@ -1,0 +1,61 @@
+# ============================================================
+# Configuration for the Logical Trading Indicator (LTI)
+# ============================================================
+
+market_data:
+  # List of symbols to backtest on
+  symbols:
+    - 'BTCUSD'
+    - 'ETH'
+
+  # List of timeframes required by the strategy
+  timeframes:
+    - '1h'
+
+# ------------------------------------------------------------
+# Indicator settings
+# These are the base settings for indicators.
+# The optimizer will override these with the ranges below.
+# ------------------------------------------------------------
+indicators:
+  atr_period: 7
+  atr_multiple: 3.0
+  basis_length: 20
+  basis_type: 'EMA' # 'SMA' or 'EMA'
+  bb_std_dev: 2.0
+  enable_consolidation_filter: true
+  
+# ------------------------------------------------------------
+# Portfolio Configuration
+# ------------------------------------------------------------
+portfolio:
+  cash: 100000
+  fees: 0.001           # 0.1% transaction fee
+  slippage: 0.001        # 0.1% slippage
+  sl_stop: 0.10          # 10% stop loss
+  # Note: The LTI strategy has its own ATR-based trailing stop logic
+  # and take profit signals. These are handled in the signals file.
+  
+# ------------------------------------------------------------
+# Optimization Parameter Ranges
+# The grid search will test all combinations of these values.
+# ------------------------------------------------------------
+optimization:
+  split_ratio: 0.8  # 80% for training, 20% for testing (more training data)
+  atr_period:
+    - 10
+    - 15
+  atr_multiple:
+    - 2.0
+    - 2.5
+  basis_length:
+    - 20
+    - 30
+  bb_std_dev:
+    - 2.0
+
+# ------------------------------------------------------------
+# Analysis Settings
+# ------------------------------------------------------------
+analysis:
+  monte_carlo_runs: 20 # Number of runs for statistical validation (increased for better statistics) 
