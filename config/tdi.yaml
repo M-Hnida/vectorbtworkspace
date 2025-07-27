@@ -1,0 +1,69 @@
+# ============================================================
+# Configuration for the Traders Dynamic Index (TDI) Strategy
+# ============================================================
+name: "tdi_strategy"
+
+# ------------------------------------------------------------
+# Strategy Parameters
+# These are the base settings for the strategy.
+# The optimizer will override these with the ranges below.
+# ------------------------------------------------------------
+parameters:
+  # Pivot Point Parameters
+  pivot_timeframe: "1D"  # Timeframe for pivot point calculation
+  pivot_number: 2
+  target_probability: 50
+  
+  # TDI Core Parameters
+  rsi_period: 21
+  tdi_fast_period: 2
+  tdi_slow_period: 7
+  tdi_middle_period: 34
+  tdi_angle_min: 20
+  tdi_angle_max: 80
+  
+  # Multi-Timeframe Settings
+  required_timeframes: ["15min", "30min", "1h", "4h", "1D"]
+  
+  # Signal Configuration (corresponds to timeframes above)
+  tdi_cross_enabled: [false, false, true, true, false]
+  tdi_trend_enabled: [false, true, true, true, false]
+  tdi_angle_enabled: [false, false, true, false, false]
+  tdi_shift: 1
+  
+  # Risk Management
+  risk_factor: 1.0
+  spread_max: 2.0
+  sl_distance_min: 20
+  tp_distance_min: 20
+
+# ------------------------------------------------------------
+# Optimization Parameter Ranges
+# The grid search will test all combinations of these values.
+# ------------------------------------------------------------
+optimization_grid:
+  # Core TDI parameters
+  rsi_period: [13, 21, 34]
+  tdi_fast_period: [2, 3, 5]
+  tdi_slow_period: [5, 7, 10]
+  tdi_middle_period: [21, 34, 55]
+  
+  # Angle sensitivity
+  tdi_angle_min: [15, 20, 25]
+  tdi_angle_max: [70, 80, 90]
+  
+  # Pivot settings
+  target_probability: [40, 50, 60]
+  pivot_number: [2, 3, 4]
+  
+  # Risk parameters
+  sl_distance_min: [15, 20, 30]
+  tp_distance_min: [15, 20, 30]
+
+
+csv_path: 
+    - "data/EURUSD_1h.csv"
+    - "data/EURUSD_15m.csv"
+    - "data/EURUSD_4h.csv"
+    - "data/EURUSD_1D.csv"
+

@@ -4,7 +4,7 @@ Momentum Strategy
 Simple momentum strategy with multi-timeframe trend confirmation.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Any
 import pandas as pd
 import pandas_ta as ta
 from base import BaseStrategy, Signals
@@ -20,22 +20,21 @@ class MomentumStrategy(BaseStrategy):
         risk_factor: Risk multiplier for position sizing (default: 1.0)
     """
     
-    def __init__(self, config: dict):
-        """Initialize Momentum strategy with symbol from config if not provided."""
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize Momentum strategy with configuration."""
         super().__init__(config)
-        self.symbol = config.get('symbol') or DataManager().defaults.get('symbol', 'EURUSD')
         self.data = {}
         
         # Strategy parameters - get from config with defaults
-        self.momentum_period = config.get('momentum_period', 10)  # Default value
-        self.signal_smoothing = config.get('signal_smoothing', 3)  # Default value
-        self.volatility_period = config.get('volatility_period', 20)  # Default value
-        self.risk_factor = config.get('risk_factor', 1.0)  # Default value
-        self.atr_period = config.get('atr_period', 14)  # Default ATR period
-        self.ma_type = config.get('ma_type', 'sma')  # Moving average type
-        self.ma_length = config.get('ma_length', 50)  # Length for moving average
-        self.atr_multiple = config.get('atr_multiple', 2.0)  # ATR multiple for stop loss
-        self.volatility_momentum_threshold = config.get('volatility_momentum_threshold', 0.01)  # Default threshold for volatility momentum
+        self.momentum_period = self.get_parameter('momentum_period', 10)
+        self.signal_smoothing = self.get_parameter('signal_smoothing', 3)
+        self.volatility_period = self.get_parameter('volatility_period', 20)
+        self.risk_factor = self.get_parameter('risk_factor', 1.0)
+        self.atr_period = self.get_parameter('atr_period', 14)
+        self.ma_type = self.get_parameter('ma_type', 'sma')
+        self.ma_length = self.get_parameter('ma_length', 50)
+        self.atr_multiple = self.get_parameter('atr_multiple', 2.0)
+        self.volatility_momentum_threshold = self.get_parameter('volatility_momentum_threshold', 0.01)
     
     def get_required_timeframes(self) -> List[str]:
         """Get timeframes required for strategy calculations."""
@@ -121,44 +120,9 @@ class MomentumStrategy(BaseStrategy):
         
         # MACD for trend confirmation
         macd = ta.macd(df['close'])
-        df['macd'] = macd['MACD_12_26_9']
-        df['macd_signal'] = macd['MACDs_12_26_9']
+        if macd is not None:
+            df['macd'] = macd['MACD_12_26_9']
+            df['macd_signal'] = macd['MACDs_12_26_9']
         
         return df
-    
-    def _generate_base_signals(self, df: pd.DataFrame) -> tuple:
-        """Generate base momentum signals."""
-        entries = pd.Series(False, index=df.index)
-        exits = pd.Series(False, index=df.index)
-        short_entries = pd.Series(False, index=df.index)
-        short_exits = pd.Series(False, index=df.index)
-        
-        # Enhanced momentum conditions
-        strong_momentum_up = df['momentum'] > self.volatility_momentum_threshold
-        strong_momentum_down = df['momentum'] < -self.volatility_momentum_threshold
-        
-        # Trend conditions
-        uptrend = df['close'] > df['wma']
-        downtrend = df['close'] < df['wma']
-        
-        # Volatility filter - avoid low volatility periods
-        sufficient_volatility = df['volatility'] > df['volatility'].rolling(50).quantile(0.3)
-        
-        # RSI conditions for additional confirmation
-        rsi_not_overbought = df['rsi'] < 70
-        rsi_not_oversold = df['rsi'] > 30
-        
-        # Long signals: positive momentum, uptrend, sufficient volatility
-        entries = strong_momentum_up & uptrend & sufficient_volatility & rsi_not_overbought
-        
-        # Long exits: negative momentum or downtrend
-        exits = strong_momentum_down | downtrend
-        
-        # Short signals: negative momentum, downtrend, sufficient volatility
-        short_entries = strong_momentum_down & downtrend & sufficient_volatility & rsi_not_oversold
-        
-        # Short exits: positive momentum or uptrend
-        short_exits = strong_momentum_up | uptrend
-        
-        return entries, exits, short_entries, short_exits
     

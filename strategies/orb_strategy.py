@@ -12,8 +12,6 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from base import BaseStrategy, Signals
-from data_manager import DataManager  # Fixed import path
-import numpy as np  # Required for numerical operations
 
 class ORBStrategy(BaseStrategy):
     """Opening Range Breakout strategy with multi-timeframe support.

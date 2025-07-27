@@ -4,7 +4,7 @@ Trading Strategies Package
 Contains all trading strategy implementations.
 """
 
-from .lti_strategy import LTIStrategy
+from .tdi_strategy import LTIStrategy
 from .momentum_strategy import MomentumStrategy
 from .orb_strategy import ORBStrategy
 
@@ -25,4 +25,4 @@ def list_available_strategies():
     """List all available strategies."""
     return list(STRATEGY_REGISTRY.keys())
 
-__all__ = ['LTIStrategy', 'MomentumStrategy', 'ORBStrategy', 'get_strategy_class', 'list_available_strategies']
+__all__ = ['TDIStrategy', 'MomentumStrategy', 'ORBStrategy', 'get_strategy_class', 'list_available_strategies']

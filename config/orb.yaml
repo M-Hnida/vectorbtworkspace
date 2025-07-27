@@ -28,14 +28,10 @@ optimization_grid:
   breakout_threshold: [0.0001, 0.001, 0.002]
   atr_multiple: [1.0, 1.5, 2.0]
 
-# ------------------------------------------------------------
-# Data Requirements
-# ------------------------------------------------------------
-data_requirements:
-  symbol_group: "volatile_pairs"  # Use volatile pairs for ORB
-  timeframes: ["15m", "1h"]       # Required timeframes
-  min_symbols: 1                  # Minimum symbols needed
-  max_symbols: 3                  # Maximum symbols to test
+csv_path: 
+    - "data/EURUSD_1h.csv"
+    - "data/EURUSD_15m.csv"
+
 
 # ------------------------------------------------------------
 # Analysis Settings
