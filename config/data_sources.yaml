@@ -1,0 +1,30 @@
+# ============================================================
+# Data Sources Configuration
+# Central configuration for all available data sources
+# ============================================================
+
+# Available data sources with their file paths and metadata
+data_sources:
+  BTCUSD:
+    file_path: "data/BTCUSD_1h_2011-2025.csv"
+    timeframe: "1h"
+    description: "Bitcoin/USD hourly data from 2011-2025"
+
+  ETHUSD:
+    file_path: "data/ETHUSD_1h_2015-2025.csv"
+    timeframe: "1h"
+    description: "Ethereum/USD hourly data from 2015-2025"
+
+    
+  EURUSD:
+    file_path: "data/EURUSD_1H_2009-2025.csv"
+    timeframe: "1h"
+    description: "EUR/USD hourly data from 2009-2025"
+
+
+    
+
+
+# Default data loading settings
+default:
+  symbol: EURUSD
