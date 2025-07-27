@@ -98,24 +98,24 @@ class TestOptimizationComponents(unittest.TestCase):
         """Test basic optimization runs."""
         # Test Monte Carlo analysis
         mc_results = self.monte_carlo.run_analysis(data=self.data)
-        self.assertIn('base_metrics', mc_results)
-        self.assertIn('simulations', mc_results)
-        self.assertIsInstance(mc_results['base_metrics'], dict)
-        self.assertIsInstance(mc_results['simulations'], list)
+        self.assertTrue(hasattr(mc_results, 'base_metrics'))
+        self.assertTrue(hasattr(mc_results, 'simulations'))
+        self.assertIsInstance(mc_results.base_metrics, dict)
+        self.assertIsInstance(mc_results.simulations, list)
         
         # Test parameter optimization
         opt_results = self.optimizer.optimize(data=self.data)
-        self.assertIn('param_combination', opt_results)
-        self.assertIn('sharpe_ratio', opt_results)
-        self.assertIsInstance(opt_results['param_combination'], dict)
-        self.assertIsInstance(opt_results['sharpe_ratio'], float)
+        self.assertTrue(hasattr(opt_results, 'param_combination'))
+        self.assertTrue(hasattr(opt_results, 'sharpe_ratio'))
+        self.assertIsInstance(opt_results.param_combination, dict)
+        self.assertIsInstance(opt_results.sharpe_ratio, float)
         
         # Test walk-forward analysis
         wfa_results = self.wfa.run_analysis(data=self.data)
-        self.assertIn('windows', wfa_results)
-        self.assertIn('summary', wfa_results)
-        self.assertIsInstance(wfa_results['windows'], list)
-        self.assertIsInstance(wfa_results['summary'], dict)
+        self.assertTrue(hasattr(wfa_results, 'windows'))
+        self.assertTrue(hasattr(wfa_results, 'summary'))
+        self.assertIsInstance(wfa_results.windows, list)
+        self.assertIsInstance(wfa_results.summary, dict)
 
 
 class TestParameterOptimizer(unittest.TestCase):

@@ -8,7 +8,6 @@ from typing import Dict, List
 import pandas as pd
 import pandas_ta as ta
 from base import BaseStrategy, Signals
-from data_manager import DataManager
 
 
 class MomentumStrategy(BaseStrategy):

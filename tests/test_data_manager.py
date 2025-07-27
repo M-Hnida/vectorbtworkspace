@@ -16,27 +16,29 @@ class TestDataManager(unittest.TestCase):
         # Standard format
         self.csv1 = os.path.join(self.test_dir, 'test1.csv')
         with open(self.csv1, 'w') as f:
-            f.write("""datetime,open,high,low,close,volume
-2023-01-01 00:00:00,100,105,95,102,1000
+            f.write("""2023-01-01 00:00:00,100,105,95,102,1000
 2023-01-01 01:00:00,102,108,100,105,1200
 2023-01-01 02:00:00,105,110,103,107,1300""")
 
-        # Different case and column names
+        # Different separator
         self.csv2 = os.path.join(self.test_dir, 'test2.csv')
         with open(self.csv2, 'w') as f:
-            f.write("""Time,O,H,L,C,V
-2023-01-01 00:00:00,100,105,95,102,1000
-2023-01-01 01:00:00,102,108,100,105,1200
-2023-01-01 02:00:00,105,110,103,107,1300""")
+            f.write("""2023-01-01 00:00:00;100;105;95;102;1000
+2023-01-01 01:00:00;102;108;100;105;1200
+2023-01-01 02:00:00;105;110;103;107;1300""")
 
         # Missing high/low columns (should fail)
         self.csv3 = os.path.join(self.test_dir, 'test3.csv')
         with open(self.csv3, 'w') as f:
-            f.write("""datetime,open,close
-2023-01-01 00:00:00,100,102
+            f.write("""2023-01-01 00:00:00,100,102
 2023-01-01 01:00:00,102,105""")
-        # csv with no headers
-        self.csv4 = os.path.join(self.test_dir, 'data/EURUSD_1H_2009-2025.csv')
+        
+        # Create directory and file for the missing test case
+        data_dir = os.path.join(self.test_dir, 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        self.csv4 = os.path.join(data_dir, 'EURUSD_1H_2009-2025.csv')
+        with open(self.csv4, 'w') as f:
+            f.write("2023-01-01 00:00:00,100")
 
     def tearDown(self):
         import shutil
@@ -47,11 +49,12 @@ class TestDataManager(unittest.TestCase):
         
         # Test standard format
         df1 = load_ohlc_csv(self.csv1)
+        print(df1)
         self.assertEqual(len(df1), 3)
         self.assertTrue(all(col in df1.columns for col in ['open', 'high', 'low', 'close', 'volume']))
         self.assertIsInstance(df1.index, pd.DatetimeIndex)
         
-        # Test with column mapping
+        # Test with different separator
         df2 = load_ohlc_csv(self.csv2)  
         self.assertEqual(len(df2), 3)
         self.assertTrue(all(col in df2.columns for col in ['open', 'high', 'low', 'close', 'volume']))
@@ -61,17 +64,20 @@ class TestDataManager(unittest.TestCase):
         
         with self.assertRaises(ValueError):
             load_ohlc_csv(self.csv3)
+        
+        # Test with file that has data but missing columns
+        with self.assertRaises(ValueError):
             load_ohlc_csv(self.csv4)
 
 
     def test_column_standardization(self):
         """Test that columns are properly standardized."""
-        df = load_ohlc_csv(self.csv2)  # Uses O,H,L,C format
+        df = load_ohlc_csv(self.csv1)
         
-        # Should be mapped to standard names
+        # Should have standard names
         expected_cols = ['open', 'high', 'low', 'close', 'volume']
         for col in expected_cols:
-            if col == 'volume' or col in ['open', 'high', 'low', 'close']:
+            if col in ['open', 'high', 'low', 'close', 'volume']:
                 self.assertIn(col, df.columns)
 
 

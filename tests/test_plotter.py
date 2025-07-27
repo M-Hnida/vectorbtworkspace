@@ -2,7 +2,6 @@
 import sys
 import unittest
 import io
-import sys
 from pathlib import Path
 import vectorbt as vbt
    
@@ -11,10 +10,6 @@ import numpy as np
 sys.path.append(str(Path(__file__).parent.parent))
 
 from plotter import TradingVisualizer  # This assumes plotter.py contains TradingVisualizer class
-from data_manager import load_ohlc_csv  # Changed from load_and_clean_csv to match actual implementation
-
-# Load sample data for testing
-data = load_ohlc_csv('data/EURUSD_1D_2009-2025.csv')
 
 
 class TestPlotter(unittest.TestCase):
