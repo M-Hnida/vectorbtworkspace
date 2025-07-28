@@ -19,6 +19,7 @@ class Signals:
     exits: Optional[pd.Series] = None
     short_entries: Optional[pd.Series] = None
     short_exits: Optional[pd.Series] = None
+    sizes: Optional[pd.Series] = None  # Optional position sizes
 
     def __post_init__(self):
         """
@@ -36,6 +37,10 @@ class Signals:
         for series in series_list[1:]:
             if not series.index.equals(first_index):
                 raise ValueError("All provided signal series must have the same index")
+        
+        # Validate sizes if provided
+        if self.sizes is not None and not self.sizes.index.equals(first_index):
+            raise ValueError("Sizes series must have the same index as signal series")
 
 
 

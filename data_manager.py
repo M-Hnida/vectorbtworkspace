@@ -94,12 +94,24 @@ def load_data_for_strategy(strategy: BaseStrategy, time_range: Optional[str] = N
         else:
             raise ValueError("No csv_path defined in strategy configuration and no data directory found")
 
-    # Extract symbol from first file name
-    symbol = csv_paths[0].split('/')[-1].split('_')[0]
-
-    data = _load_symbol_data(csv_paths, required_timeframes, time_range, end_date)
-
-    return {symbol: data}
+    # Group files by symbol and load each symbol's data
+    symbol_files = {}
+    for path in csv_paths:
+        symbol = os.path.basename(path).split('_')[0]
+        if symbol not in symbol_files:
+            symbol_files[symbol] = []
+        symbol_files[symbol].append(path)
+    
+    # Load data for each symbol
+    all_symbols_data = {}
+    for symbol, files in symbol_files.items():
+        try:
+            data = _load_symbol_data(files, required_timeframes, time_range, end_date)
+            all_symbols_data[symbol] = data
+        except Exception as e:
+            print(f"⚠️ Failed to load data for {symbol}: {e}")
+    
+    return all_symbols_data
 
 def _load_symbol_data(file_paths: List[str], required_timeframes: List[str], 
                      time_range: Optional[str] = None, 

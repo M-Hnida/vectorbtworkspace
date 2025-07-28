@@ -28,8 +28,8 @@ optimization_grid:
   breakout_threshold: [0.0001, 0.001, 0.002]
   atr_multiple: [1.0, 1.5, 2.0]
 
-csv_path: 
-  - "data/EURUSD_15m.csv"
+csv_path:
+  - "data/EURUSD_15m_2021-2025.csv"
   - "data/EURUSD_1H_2009-2025.csv"
 
 

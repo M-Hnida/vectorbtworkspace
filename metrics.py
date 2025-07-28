@@ -3,7 +3,7 @@ Portfolio Metrics Module
 Provides comprehensive portfolio performance analysis and metrics calculation.
 """
 
-from typing import Dict, Any
+from typing import Dict, Union
 import pandas as pd
 import vectorbt as vbt
 
@@ -13,7 +13,7 @@ DEFAULT_VAR_CUTOFF_99 = 0.01
 ZERO_THRESHOLD = 1e-10
 
 
-def calc_metrics(portfolio: vbt.Portfolio) -> Dict[str, Any]:
+def calc_metrics(portfolio: vbt.Portfolio) -> Dict[str, Union[float, int]]:
     """Calculate comprehensive portfolio metrics with robust error handling.
     
     Args:
@@ -42,13 +42,13 @@ def calc_metrics(portfolio: vbt.Portfolio) -> Dict[str, Any]:
         return _get_default_metrics()
 
 
-def _calculate_basic_metrics(portfolio: vbt.Portfolio, stats: pd.Series) -> Dict[str, Any]:
+def _calculate_basic_metrics(portfolio: vbt.Portfolio, stats: pd.Series) -> Dict[str, Union[float, int]]:
     """Calculate basic performance metrics."""
     metrics = {}
     
     # Basic performance metrics
-    metrics['total_return'] = stats.get('Total Return [%]', 0)
-    metrics['max_drawdown'] = stats.get('Max Drawdown [%]', 0)
+    metrics['return'] = stats.get('Total Return [%]', 0)
+    metrics['max_dd'] = stats.get('Max Drawdown [%]', 0)
     
     # Sharpe ratio with zero division protection
     returns_std = portfolio.returns().std()
@@ -62,12 +62,12 @@ def _calculate_basic_metrics(portfolio: vbt.Portfolio, stats: pd.Series) -> Dict
     return metrics
 
 
-def _calculate_trade_metrics(portfolio: vbt.Portfolio, stats: pd.Series) -> Dict[str, Any]:
+def _calculate_trade_metrics(portfolio: vbt.Portfolio, stats: pd.Series) -> Dict[str, Union[float, int]]:
     """Calculate trade-related metrics."""
     metrics = {}
     
     total_trades = stats.get('Total Trades', 0)
-    metrics['total_trades'] = total_trades
+    metrics['trades'] = total_trades
     
     if total_trades > 0:
         try:
@@ -93,7 +93,7 @@ def _calculate_trade_metrics(portfolio: vbt.Portfolio, stats: pd.Series) -> Dict
     return metrics
 
 
-def _calculate_risk_metrics(portfolio: vbt.Portfolio) -> Dict[str, Any]:
+def _calculate_risk_metrics(portfolio: vbt.Portfolio) -> Dict[str, Union[float, int]]:
     """Calculate risk-related metrics."""
     metrics = {}
     
@@ -123,38 +123,38 @@ def _calculate_risk_metrics(portfolio: vbt.Portfolio) -> Dict[str, Any]:
     return metrics
 
 
-def _get_default_metrics() -> Dict[str, Any]:
+def _get_default_metrics() -> Dict[str, Union[float, int]]:
     """Return default metrics when calculation fails."""
     return {
-        'total_return': 0,
-        'max_drawdown': 0,
-        'sharpe': 0,
-        'calmar': 0,
-        'total_trades': 0,
-        'win_rate': 0,
-        'profit_factor': 0,
-        'avg_win': 0,
-        'avg_loss': 0,
-        'win_loss_ratio': 0,
-        'volatility': 0,
-        'var_95': 0,
-        'var_99': 0,
-        'downside_vol': 0
+        'return': 0.0,
+        'max_dd': 0.0,
+        'sharpe': 0.0,
+        'calmar': 0.0,
+        'trades': 0,
+        'win_rate': 0.0,
+        'profit_factor': 0.0,
+        'avg_win': 0.0,
+        'avg_loss': 0.0,
+        'win_loss_ratio': 0.0,
+        'volatility': 0.0,
+        'var_95': 0.0,
+        'var_99': 0.0,
+        'downside_vol': 0.0
     }
 
 
-def _get_default_trade_metrics() -> Dict[str, Any]:
+def _get_default_trade_metrics() -> Dict[str, Union[float, int]]:
     """Return default trade metrics."""
     return {
-        'win_rate': 0,
-        'profit_factor': 0,
-        'avg_win': 0,
-        'avg_loss': 0,
-        'win_loss_ratio': 0
+        'win_rate': 0.0,
+        'profit_factor': 0.0,
+        'avg_win': 0.0,
+        'avg_loss': 0.0,
+        'win_loss_ratio': 0.0
     }
 
 
-def print_metrics(metrics: Dict[str, Any], name: str = "Portfolio") -> None:
+def print_metrics(metrics: Dict[str, Union[float, int]], name: str = "Portfolio") -> None:
     """Print formatted metrics with consistent naming.
     
     Args:
@@ -164,11 +164,11 @@ def print_metrics(metrics: Dict[str, Any], name: str = "Portfolio") -> None:
     print(f"\n📊 {name} Analysis:")
     print(f"   Sharpe Ratio: {metrics['sharpe']:.3f}")
     print(f"   Calmar Ratio: {metrics['calmar']:.3f}")
-    print(f"   Total Return: {metrics['total_return']:.2f}%")
-    print(f"   Max Drawdown: {metrics['max_drawdown']:.2f}%")
-    print(f"   Total Trades: {metrics['total_trades']}")
+    print(f"   Total Return: {metrics['return']:.2f}%")
+    print(f"   Max Drawdown: {metrics['max_dd']:.2f}%")
+    print(f"   Total Trades: {metrics['trades']}")
 
-    if metrics['total_trades'] > 0:
+    if metrics['trades'] > 0:
         print(f"   Win Rate: {metrics['win_rate']:.1f}%")
         print(f"   Profit Factor: {metrics['profit_factor']:.2f}")
         print(f"   Win/Loss Ratio: {metrics['win_loss_ratio']:.2f}")

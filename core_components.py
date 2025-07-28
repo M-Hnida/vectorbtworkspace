@@ -6,13 +6,15 @@ Contains base classes and core functionality shared across modules.
 
 import os
 import warnings
-from typing import Dict
+from typing import Dict, Optional, Union
+from dataclasses import dataclass
 
 import pandas as pd
 import vectorbt as vbt
 import yaml
 
 from base import Signals, StrategyConfig
+from validation import validate_ohlc_dataframe, validate_signals
 
 # Constants
 DEFAULT_INIT_CASH = 50000
@@ -53,17 +55,35 @@ def run_backtest(df: pd.DataFrame, signals: Signals, init_cash: int = DEFAULT_IN
         # Infer frequency from the data index
         freq = _infer_frequency(df_aligned.index)
         
-        portfolio = vbt.Portfolio.from_signals(
-            close=df_aligned['close'],
-            init_cash=init_cash,
-            entries=signals_aligned.entries,
-            exits=signals_aligned.exits,
-            short_entries=signals_aligned.short_entries,
-            short_exits=signals_aligned.short_exits,
-            fees=fees,
-            slippage=slippage,
-            freq=freq
-        )
+        # Use custom sizes if provided, otherwise default sizing
+        if hasattr(signals_aligned, 'sizes') and signals_aligned.sizes is not None:
+            # Use strategy-provided sizes
+            portfolio = vbt.Portfolio.from_signals(
+                close=df_aligned['close'],
+                init_cash=init_cash,
+                entries=signals_aligned.entries,
+                exits=signals_aligned.exits,
+                short_entries=signals_aligned.short_entries,
+                short_exits=signals_aligned.short_exits,
+                size=signals_aligned.sizes,
+                size_type='percent',  # Sizes are percentages of portfolio
+                fees=fees,
+                slippage=slippage,
+                freq=freq
+            )
+        else:
+            # Default fixed sizing
+            portfolio = vbt.Portfolio.from_signals(
+                close=df_aligned['close'],
+                init_cash=init_cash,
+                entries=signals_aligned.entries,
+                exits=signals_aligned.exits,
+                short_entries=signals_aligned.short_entries,
+                short_exits=signals_aligned.short_exits,
+                fees=fees,
+                slippage=slippage,
+                freq=freq
+            )
 
         return portfolio
 
@@ -105,12 +125,8 @@ def _infer_frequency(index: pd.DatetimeIndex) -> str:
 
 def _validate_backtest_inputs(df: pd.DataFrame, signals: Signals) -> None:
     """Validate inputs for backtest function."""
-    if df.empty:
-        raise ValueError("DataFrame cannot be empty")
-    if 'close' not in df.columns:
-        raise ValueError("DataFrame must contain 'close' column")
-    if signals.entries.empty:
-        raise ValueError("Signals cannot be empty")
+    validate_ohlc_dataframe(df, "Backtest data")
+    validate_signals(signals, df.index, "Backtest signals")
 
 
 def _align_data_and_signals(df: pd.DataFrame, signals: Signals) -> tuple:

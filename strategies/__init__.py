@@ -7,11 +7,12 @@ Contains all trading strategy implementations.
 from .tdi_strategy import TDIStrategy
 from .momentum_strategy import MomentumStrategy
 from .orb_strategy import ORBStrategy
+from .vectorbt_strategy import VectorBTStrategy
 
 # Strategy registry for dynamic loading
 STRATEGY_REGISTRY = {
     strategy.__name__.lower().replace('strategy', ''): strategy 
-    for strategy in [TDIStrategy, MomentumStrategy, ORBStrategy]
+    for strategy in [TDIStrategy, MomentumStrategy, ORBStrategy, VectorBTStrategy]
 }
 
 def get_strategy_class(strategy_name: str):
@@ -25,4 +26,4 @@ def list_available_strategies():
     """List all available strategies."""
     return list(STRATEGY_REGISTRY.keys())
 
-__all__ = ['TDIStrategy', 'MomentumStrategy', 'ORBStrategy', 'get_strategy_class', 'list_available_strategies']
+__all__ = ['TDIStrategy', 'MomentumStrategy', 'ORBStrategy', 'VectorBTStrategy', 'get_strategy_class', 'list_available_strategies']

@@ -18,13 +18,14 @@ from functools import partial
 from core_components import run_backtest
 from metrics import calc_metrics
 from base import BaseStrategy, StrategyConfig, Signals
+from validation import validate_optimization_data, validate_walkforward_data, validate_ohlc_dataframe
 import vectorbt as vbt
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-def _optimize_single_combination(args):
+def _optimize_params(args):
     """Global function for parallel optimization of a single parameter combination."""
     try:
         data, strategy_class, config, params, combination_id = args
@@ -140,9 +141,8 @@ class ParameterOptimizer:
         
     def optimize(self, data: pd.DataFrame) -> OptimizationResult:
         """Run grid search optimization on training data."""
-        # Validate input data
-        if data is None or data.empty:
-            raise ValueError("Input data cannot be None or empty")
+        # Comprehensive data validation
+        validate_optimization_data(data, min_length=50)
             
         if self.opt_config.verbose:
             self.logger.info("Running Grid Search Optimization")
@@ -152,12 +152,12 @@ class ParameterOptimizer:
         train_data = data.iloc[:split_idx].copy()
         
         # Generate parameter combinations
-        param_combinations = self._generate_parameter_combinations()
+        param_combinations = self._generate_combinations()
         
         if not param_combinations:
             if self.opt_config.verbose:
                 self.logger.warning("No optimization parameters defined, using default parameters")
-            return self._run_single_optimization(train_data, self.strategy.parameters)
+            return self._run_single_opt(train_data, self.strategy.parameters)
         
         if self.opt_config.verbose:
             self.logger.info(f"Testing {len(param_combinations)} parameter combinations...")
@@ -179,7 +179,7 @@ class ParameterOptimizer:
             raise ValueError("No successful parameter combinations found")
         
         # Find best parameters
-        best_result = self._select_best_parameters(results)
+        best_result = self._select_best(results)
         
         if self.opt_config.verbose:
             self.logger.info("Optimal parameters found:")
@@ -202,7 +202,7 @@ class ParameterOptimizer:
         with ProcessPoolExecutor(max_workers=self.opt_config.max_workers) as executor:
             # Submit all jobs
             future_to_id = {
-                executor.submit(_optimize_single_combination, args): i 
+                executor.submit(_optimize_params, args): i
                 for i, args in enumerate(args_list)
             }
             
@@ -276,7 +276,7 @@ class ParameterOptimizer:
         
         return results
     
-    def _create_strategy_with_params(self, params: Dict[str, Any]) -> BaseStrategy:
+    def _create_strategy(self, params: Dict[str, Any]) -> BaseStrategy:
         """Create a new strategy instance with updated parameters."""
         # Create a deep copy of the config and update parameters
         new_config = copy.deepcopy(self.config)
@@ -284,7 +284,7 @@ class ParameterOptimizer:
         # Create new strategy instance with updated config
         return self.strategy.__class__(new_config)
     
-    def _generate_parameter_combinations(self) -> List[Dict[str, Any]]:
+    def _generate_combinations(self) -> List[Dict[str, Any]]:
         """Generate all parameter combinations from optimization grid."""
         if not self.optimization_grid:
             return []
@@ -317,10 +317,10 @@ class ParameterOptimizer:
         
         return combinations
     
-    def _run_single_optimization(self, data: pd.DataFrame, params: Dict[str, Any]) -> OptimizationResult:
+    def _run_single_opt(self, data: pd.DataFrame, params: Dict[str, Any]) -> OptimizationResult:
         """Run optimization for a single parameter combination."""
         # Create a new strategy instance with the given parameters to avoid mutating state
-        temp_strategy = self._create_strategy_with_params(params)
+        temp_strategy = self._create_strategy(params)
         
         try:
             # The strategy expects a dictionary of dataframes, keyed by timeframe.
@@ -350,7 +350,7 @@ class ParameterOptimizer:
             self.logger.error(f"Error in parameter combination {params}: {str(e)}")
             raise
     
-    def _select_best_parameters(self, results: List[OptimizationResult]) -> OptimizationResult:
+    def _select_best(self, results: List[OptimizationResult]) -> OptimizationResult:
         """Select best parameters using composite scoring."""
         if not results:
             raise ValueError("No results to select from")
@@ -386,16 +386,15 @@ class WalkForwardAnalysis:
         
     def run_analysis(self, data: pd.DataFrame) -> WalkForwardResult:
         """Run walk-forward analysis."""
-        # Validate input data
-        if data is None or data.empty:
-            raise ValueError("Input data cannot be None or empty")
-            
+        # Comprehensive data validation
+        validate_walkforward_data(
+            data,
+            self.opt_config.window_size,
+            self.opt_config.step_size,
+            self.opt_config.num_windows
+        )
+
         self.logger.info(f"Running walk-forward analysis with {self.opt_config.num_windows} windows")
-        
-        if len(data) < self.opt_config.window_size * 2:
-            error_msg = f"Insufficient data for walk-forward analysis. Need at least {self.opt_config.window_size * 2} bars"
-            self.logger.warning(error_msg)
-            raise ValueError(error_msg)
         
         results: List[Dict[str, Any]] = []
         total_length = len(data)
@@ -414,6 +413,14 @@ class WalkForwardAnalysis:
             
             if len(test_data) < 10:
                 continue
+
+            # Validate window data
+            try:
+                validate_ohlc_dataframe(train_data, f"Train window {i+1}")
+                validate_ohlc_dataframe(test_data, f"Test window {i+1}")
+            except ValueError as e:
+                self.logger.warning(f"Skipping window {i+1} due to validation error: {e}")
+                continue
                 
             try:
                 window_result = self._analyze_window(train_data, test_data, i + 1)
@@ -426,8 +433,8 @@ class WalkForwardAnalysis:
         if not results:
             raise ValueError("No successful walk-forward windows")
         
-        summary: Dict[str, float] = self._aggregate_results(results)
-        efficiency: float = self._calculate_efficiency(results)
+        summary: Dict[str, float] = self._aggregate_data(results)
+        efficiency: float = self._calc_efficiency(results)
         
         return WalkForwardResult(
             windows=results,
@@ -474,7 +481,7 @@ class WalkForwardAnalysis:
             self.logger.error(f"Error evaluating optimal parameters in window {window_num}: {e}")
             raise
     
-    def _aggregate_results(self, results: List[Dict[str, Any]]) -> Dict[str, float]:
+    def _aggregate_data(self, results: List[Dict[str, Any]]) -> Dict[str, float]:
         """Aggregate walk-forward results."""
         train_returns = [r['train_metrics'].get('return', 0) for r in results]
         test_returns = [r['test_metrics'].get('return', 0) for r in results]
@@ -490,7 +497,7 @@ class WalkForwardAnalysis:
             "sharpe_consistency": float(np.std(test_sharpes))
         }
     
-    def _calculate_efficiency(self, results: List[Dict[str, Any]]) -> float:
+    def _calc_efficiency(self, results: List[Dict[str, Any]]) -> float:
         """Calculate walk-forward efficiency."""
         if not results:
             return 0.0
@@ -523,9 +530,8 @@ class MonteCarloAnalysis:
         
     def run_analysis(self, data: pd.DataFrame) -> MonteCarloResult:
         """Run Monte Carlo analysis with return randomization."""
-        # Validate input data
-        if data is None or data.empty:
-            raise ValueError("Input data cannot be None or empty")
+        # Comprehensive data validation
+        validate_optimization_data(data, min_length=100)
             
         self.logger.info(f"Running Monte Carlo analysis with {self.opt_config.num_mc_runs} simulations")
         
@@ -581,7 +587,7 @@ class MonteCarloAnalysis:
         if not mc_results:
             raise ValueError("All Monte Carlo simulations failed")
         
-        analysis: Dict[str, Any] = self._analyze_monte_carlo_results(mc_results, base_metrics)
+        analysis: Dict[str, Any] = self._analyze_results(mc_results, base_metrics)
         
         return MonteCarloResult(
             base_metrics=base_metrics,
@@ -590,7 +596,7 @@ class MonteCarloAnalysis:
             num_successful_runs=len(mc_results)
         )
     
-    def _analyze_monte_carlo_results(self, results: List[Dict[str, Any]], base_metrics: Dict[str, Union[float, int]]) -> Dict[str, Any]:
+    def _analyze_results(self, results: List[Dict[str, Any]], base_metrics: Dict[str, Union[float, int]]) -> Dict[str, Any]:
         """Analyze Monte Carlo simulation results."""
         returns = [r['metrics'].get('return', 0) for r in results]
         sharpes = [r['metrics'].get('sharpe', 0) for r in results]

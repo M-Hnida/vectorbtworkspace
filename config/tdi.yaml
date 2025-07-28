@@ -53,9 +53,9 @@ optimization_grid:
   pivot_number: [2, 3]
 
 
-csv_path: 
-  - "data/EURUSD_15m.csv"
-  - "data/EURUSD_30m.csv"
+csv_path:
+  - "data/EURUSD_15m_2021-2025.csv"
+  - "data/EURUSD_30m_2017_2025.csv"
   - "data/EURUSD_1H_2009-2025.csv"
   - "data/EURUSD_4H_2009-2025.csv"
   - "data/EURUSD_1D_2009-2025.csv"

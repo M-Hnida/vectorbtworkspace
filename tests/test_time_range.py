@@ -3,10 +3,9 @@
 Test script for time range functionality
 """
 
-from data_manager import load_data_for_strategy, _parse_time_range, _harmonize_time_ranges
+from data_manager import load_data_for_strategy, _parse_time_range
 from strategies.momentum_strategy import MomentumStrategy
 from base import StrategyConfig
-import pandas as pd
 
 def test_time_range_parsing():
     """Test time range parsing functionality."""
