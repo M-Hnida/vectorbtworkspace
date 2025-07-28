@@ -5,13 +5,16 @@ Multi-timeframe opening range breakout strategy.
 Can use higher timeframe for range definition and lower timeframe for entries.
 """
 
-from typing import Dict, Any, List
+import os
+import sys
+from typing import Dict, List
+
 import pandas as pd
 import pandas_ta as ta
-import sys
-import os
+
+from base import BaseStrategy, Signals, StrategyConfig
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from base import BaseStrategy, Signals
+
 
 class ORBStrategy(BaseStrategy):
     """Opening Range Breakout strategy with multi-timeframe support.
@@ -23,21 +26,20 @@ class ORBStrategy(BaseStrategy):
         required_timeframes: List of timeframes required for strategy calculations
     """
     
-    def __init__(self, config: dict):
+    def __init__(self, config: StrategyConfig):
         """Initialize ORB strategy with symbol from config if not provided."""
         super().__init__(config)
-        self.symbol = config.get('symbol') or DataManager().defaults.get('symbol', 'EURUSD')
+        self.symbol = self.get_parameter('symbol', 'EURUSD')
         self.data = {}
         
         # Strategy parameters - get from config with defaults
-        self.orb_period = config.get('orb_period', 1)  # Default value
-        self.breakout_threshold = config.get('breakout_threshold', 0.005)  # Default value (0.5% of price)
-        self.atr_multiple = config.get('atr_multiple', 2.0)  # Default value for ATR multiple
-        self.required_timeframes = config.get('timeframes', ['1h'])  # Default required timeframe
+        self.orb_period = self.get_parameter('orb_period', 1)
+        self.breakout_threshold = self.get_parameter('breakout_threshold', 0.005)
+        self.atr_multiple = self.get_parameter('atr_multiple', 2.0)
     
     def get_required_timeframes(self) -> List[str]:
         """Get timeframes required for strategy calculations."""
-        return self.required_timeframes
+        return self.get_parameter('required_timeframes', ['15m', '1h'])
     
     def get_required_columns(self) -> List[str]:
         return ['open', 'high', 'low', 'close']
@@ -55,7 +57,8 @@ class ORBStrategy(BaseStrategy):
             return Signals(empty_series, empty_series, empty_series, empty_series)
         
         # Use the first required timeframe that is present in the data, or fall back to the first available timeframe
-        main_tf = next((tf for tf in self.required_timeframes if tf in available_tfs), available_tfs[0])
+        required_tfs = self.get_required_timeframes()
+        main_tf = next((tf for tf in required_tfs if tf in available_tfs), available_tfs[0])
         
         data = tf_data.get(main_tf, pd.DataFrame())
         if data.empty:
@@ -73,8 +76,9 @@ class ORBStrategy(BaseStrategy):
         range_data = data.copy()
         entry_data = data.copy()
         
-        if len(self.required_timeframes) > 1:
-            range_tf = self.required_timeframes[1]
+        required_tfs = self.get_required_timeframes()
+        if len(required_tfs) > 1:
+            range_tf = required_tfs[1]
             if range_tf in tf_data:
                 range_data = tf_data[range_tf].copy()
         
@@ -83,7 +87,8 @@ class ORBStrategy(BaseStrategy):
         entry_df = self._calculate_entry_indicators(entry_data)
         
         # Align data if using different timeframes
-        if len(self.required_timeframes) > 1:
+        required_tfs = self.get_required_timeframes()
+        if len(required_tfs) > 1:
             aligned_ranges = self._align_ranges_to_entry_timeframe(range_df, entry_df)
         else:
             aligned_ranges = range_df
@@ -159,7 +164,7 @@ class ORBStrategy(BaseStrategy):
         return aligned_df
     
     def _generate_orb_signals(self, range_df: pd.DataFrame, entry_df: pd.DataFrame) -> tuple:
-        """Generate ORB signals."""
+        """Generate ORB signals with proper position tracking."""
         # Use the common index
         common_index = range_df.index.intersection(entry_df.index)
         if len(common_index) == 0:
@@ -179,33 +184,74 @@ class ORBStrategy(BaseStrategy):
         prev_range_high = range_aligned['range_high'].shift(1)
         prev_range_low = range_aligned['range_low'].shift(1)
         
-        # Enhanced breakout conditions
-        # Long signals: close breaks above previous range high
+        # Improved breakout conditions - focus on strong breakouts
+        # Long signals: close breaks above previous range high with confirmation
         long_breakout = entry_aligned['close'] > prev_range_high
-        long_range_filter = range_aligned['range_size'] > (self.breakout_threshold * 0.1)
-        long_momentum = entry_aligned['momentum'] > -0.001
-        long_volume = entry_aligned['volume_ratio'] > 0.8  # Decent volume
-        long_volatility = entry_aligned['volatility'] > 0.005  # Minimum volatility
+        long_strong_breakout = (entry_aligned['close'] - prev_range_high) > (entry_aligned['atr'] * 0.1)  # Minimum breakout size
+        long_range_filter = range_aligned['range_size'] > self.breakout_threshold  # Use original threshold
+        long_momentum = entry_aligned['momentum'] > 0.0001  # Positive momentum
+        long_volume = entry_aligned['volume_ratio'] > 0.8  # Good volume
+        long_volatility = entry_aligned['volatility'] > 0.002  # Sufficient volatility
         
-        entries = (long_breakout & long_range_filter & long_momentum & 
-                  long_volume & long_volatility)
+        entries = (long_breakout & long_strong_breakout & long_range_filter & 
+                  long_momentum & long_volume & long_volatility)
         
-        # Long exits: close breaks below previous range low or stop loss
-        long_stop_loss = entry_aligned['close'] < (prev_range_high - entry_aligned['atr'] * self.atr_multiple)
-        exits = (entry_aligned['close'] < prev_range_low) | long_stop_loss
-        
-        # Short signals: close breaks below previous range low
+        # Short signals: close breaks below previous range low with confirmation
         short_breakdown = entry_aligned['close'] < prev_range_low
-        short_range_filter = range_aligned['range_size'] > (self.breakout_threshold * 0.1)
-        short_momentum = entry_aligned['momentum'] < 0.001
-        short_volume = entry_aligned['volume_ratio'] > 0.8
-        short_volatility = entry_aligned['volatility'] > 0.005
+        short_strong_breakdown = (prev_range_low - entry_aligned['close']) > (entry_aligned['atr'] * 0.1)  # Minimum breakdown size
+        short_range_filter = range_aligned['range_size'] > self.breakout_threshold  # Use original threshold
+        short_momentum = entry_aligned['momentum'] < -0.0001  # Negative momentum
+        short_volume = entry_aligned['volume_ratio'] > 0.8  # Good volume
+        short_volatility = entry_aligned['volatility'] > 0.002  # Sufficient volatility
         
-        short_entries = (short_breakdown & short_range_filter & short_momentum & 
-                        short_volume & short_volatility)
+        short_entries = (short_breakdown & short_strong_breakdown & short_range_filter & 
+                        short_momentum & short_volume & short_volatility)
         
-        # Short exits: close breaks above previous range high or stop loss
-        short_stop_loss = entry_aligned['close'] > (prev_range_low + entry_aligned['atr'] * self.atr_multiple)
-        short_exits = (entry_aligned['close'] > prev_range_high) | short_stop_loss
+        # Position tracking for proper exit signals
+        long_position = pd.Series(False, index=common_index)
+        short_position = pd.Series(False, index=common_index)
+        
+        # Track positions and generate exits only when in position
+        for i in range(1, len(common_index)):
+            idx = common_index[i]
+            prev_idx = common_index[i-1]
+            
+            # Update position status
+            if entries.iloc[i]:
+                long_position.iloc[i] = True
+            elif long_position.iloc[i-1] and not exits.iloc[i-1]:
+                long_position.iloc[i] = True
+                
+            if short_entries.iloc[i]:
+                short_position.iloc[i] = True
+            elif short_position.iloc[i-1] and not short_exits.iloc[i-1]:
+                short_position.iloc[i] = True
+            
+            # Generate exit signals only when in position with improved logic
+            if long_position.iloc[i]:
+                # Take profit at 2x ATR above entry
+                take_profit = entry_aligned['close'].iloc[i] > (prev_range_high.iloc[i] + entry_aligned['atr'].iloc[i] * 2.0)
+                # Stop loss at range low or 1.5x ATR below entry
+                stop_loss = entry_aligned['close'].iloc[i] < (prev_range_high.iloc[i] - entry_aligned['atr'].iloc[i] * self.atr_multiple)
+                # Exit on negative momentum
+                momentum_exit = entry_aligned['momentum'].iloc[i] < -0.001
+                
+                exits.iloc[i] = take_profit or stop_loss or momentum_exit
+                
+                if exits.iloc[i]:
+                    long_position.iloc[i] = False
+            
+            if short_position.iloc[i]:
+                # Take profit at 2x ATR below entry
+                take_profit = entry_aligned['close'].iloc[i] < (prev_range_low.iloc[i] - entry_aligned['atr'].iloc[i] * 2.0)
+                # Stop loss at range high or 1.5x ATR above entry
+                stop_loss = entry_aligned['close'].iloc[i] > (prev_range_low.iloc[i] + entry_aligned['atr'].iloc[i] * self.atr_multiple)
+                # Exit on positive momentum
+                momentum_exit = entry_aligned['momentum'].iloc[i] > 0.001
+                
+                short_exits.iloc[i] = take_profit or stop_loss or momentum_exit
+                
+                if short_exits.iloc[i]:
+                    short_position.iloc[i] = False
         
         return entries, exits, short_entries, short_exits

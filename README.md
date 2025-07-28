@@ -7,6 +7,7 @@ A robust and comprehensive trading strategy analysis framework with advanced bac
 - **Advanced Trading Pipeline**: Comprehensive suite including parameter optimization, walk-forward analysis, Monte Carlo simulation, and backtesting
 - **Multiple Strategy Support**: Pre-built strategies including LTI (Logical Trading Indicator), Momentum, and ORB (Opening Range Breakout)
 - **Multi-Timeframe Analysis**: Support for strategies using multiple timeframes for trend filtering and range definition
+- **Time Range Control**: Flexible time range selection (e.g., '2y', '6m', '1y') with automatic data harmonization across timeframes
 - **Sophisticated Analytics**: In-depth performance metrics, risk analysis, and statistical validation tools
 - **Interactive Visualizations**: Professional-grade charts and dashboards using Plotly
 - **Multi-Asset Capability**: Analyze multiple symbols and timeframes simultaneously
@@ -126,6 +127,16 @@ The system supports CSV files with OHLC data. It automatically detects:
 - With or without headers
 - Multiple datetime formats
 
+### Time Range Harmonization
+
+The system automatically harmonizes time ranges across different CSV files:
+- **Automatic Alignment**: When loading multiple timeframes, the system finds the common overlapping period
+- **User Control**: Users can specify custom time ranges (e.g., '2y', '6m') that apply consistently across all timeframes
+- **Smart Filtering**: Time ranges are calculated from the most recent data backwards, ensuring you get the latest market conditions
+- **Data Validation**: The system ensures all timeframes have data for the specified period before proceeding with analysis
+
+Example: If you have EURUSD_1H_2009-2025.csv and EURUSD_4H_2009-2025.csv, specifying '2y' will load the last 2 years of data from both files, ensuring perfect alignment for multi-timeframe strategies.
+
 ## Customization
 
 ### Adding New Strategies
@@ -210,6 +221,28 @@ from trading_system import run_strategy_pipeline
 
 # Run complete analysis for LTI strategy
 results = run_strategy_pipeline('lti')
+```
+
+### Time Range Control
+```python
+from trading_system import run_strategy_with_time_range
+
+# Run strategy on last 2 years of data
+results = run_strategy_with_time_range('momentum', '2y')
+
+# Run strategy on last 6 months
+results = run_strategy_with_time_range('orb', '6m')
+
+# Run strategy with custom end date
+results = run_strategy_with_time_range('momentum', '1y', '2024-12-31')
+
+# Supported time range formats:
+# '2y' - 2 years
+# '1y' - 1 year  
+# '6m' - 6 months
+# '3m' - 3 months
+# '30d' - 30 days
+# '4w' - 4 weeks
 ```
 
 ### Custom Strategy Development

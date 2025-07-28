@@ -29,3 +29,6 @@ optimization_grid:
 
 analysis_settings:
   monte_carlo_runs: 5
+
+csv_path:
+  - "data/EURUSD_1H_2009-2025.csv"

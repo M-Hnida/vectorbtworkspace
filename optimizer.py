@@ -11,6 +11,9 @@ import pandas as pd
 import numpy as np
 import logging
 import copy
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
+from functools import partial
 
 from core_components import run_backtest
 from metrics import calc_metrics
@@ -20,12 +23,52 @@ import vectorbt as vbt
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
+def _optimize_single_combination(args):
+    """Global function for parallel optimization of a single parameter combination."""
+    try:
+        data, strategy_class, config, params, combination_id = args
+        
+        # Create strategy with parameters
+        new_config = copy.deepcopy(config)
+        new_config.parameters.update(params)
+        temp_strategy = strategy_class(new_config)
+        
+        # Generate signals
+        required_tfs = temp_strategy.get_required_timeframes()
+        main_tf = required_tfs[0] if required_tfs else '1h'
+        tf_data = {main_tf: data}
+        signals = temp_strategy.generate_signals(tf_data)
+        
+        # Run backtest
+        portfolio = run_backtest(data, signals)
+        metrics = calc_metrics(portfolio)
+        
+        return OptimizationResult(
+            portfolio=portfolio,  # Will be replaced with final portfolio for best result
+            metrics=metrics,
+            sharpe_ratio=float(metrics.get('sharpe', -999)),
+            total_return=metrics.get('total_return', -999),
+            max_drawdown=metrics.get('max_drawdown', 999),
+            profit_factor=metrics.get('profit_factor', 0),
+            param_combination=params,
+            combination_id=combination_id
+        )
+        
+    except Exception as e:
+        # Return None on any error - will be handled by the optimizer
+        return None
+
 @dataclass
 class OptimizationConfig:
     """Configuration class for optimization parameters."""
     # Grid search parameters
     split_ratio: float = 0.7
     verbose: bool = True
+    max_workers: int = min(4, mp.cpu_count())  # Limit parallel workers
+    enable_parallel: bool = True  # Enable/disable parallel processing
+    early_stopping: bool = True
+    early_stopping_patience: int = 10  # Stop if no improvement for N combinations
     
     # Walk forward analysis parameters
     window_size: int = 504  # Minimum 2 years of daily data (252 * 2)
@@ -47,6 +90,10 @@ class OptimizationConfig:
             raise ValueError("num_windows must be positive")
         if self.num_mc_runs <= 0:
             raise ValueError("num_mc_runs must be positive")
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive")
+        if self.early_stopping_patience <= 0:
+            raise ValueError("early_stopping_patience must be positive")
 
 
 @dataclass
@@ -80,7 +127,7 @@ class MonteCarloResult:
 
 
 class ParameterOptimizer:
-    """Handles parameter optimization using grid search."""
+    """Handles parameter optimization using grid search with parallel processing."""
     
     def __init__(self, strategy: BaseStrategy, config: StrategyConfig, 
                  opt_config: Optional[OptimizationConfig] = None):
@@ -89,6 +136,7 @@ class ParameterOptimizer:
         self.optimization_grid = config.optimization_grid
         self.opt_config = opt_config or OptimizationConfig()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self._best_sharpe = -999  # Track best sharpe for early stopping
         
     def optimize(self, data: pd.DataFrame) -> OptimizationResult:
         """Run grid search optimization on training data."""
@@ -114,23 +162,18 @@ class ParameterOptimizer:
         if self.opt_config.verbose:
             self.logger.info(f"Testing {len(param_combinations)} parameter combinations...")
         
-        # Test all combinations
-        results: List[OptimizationResult] = []
-        for i, params in enumerate(param_combinations):
+        # Use parallel processing for optimization with fallback to sequential
+        if (len(param_combinations) > 1 and 
+            self.opt_config.max_workers > 1 and 
+            self.opt_config.enable_parallel):
             try:
-                result = self._run_single_optimization(train_data, params)
-                result.param_combination = params
-                result.combination_id = i
-                results.append(result)
-                
-                # Only show progress for larger optimization runs
-                if self.opt_config.verbose and len(param_combinations) > 20 and (i + 1) % 10 == 0:
-                    self.logger.info(f"Completed {i + 1}/{len(param_combinations)} combinations")
-                    
+                results = self._optimize_parallel(train_data, param_combinations)
             except Exception as e:
                 if self.opt_config.verbose:
-                    self.logger.warning(f"Error with parameter combination {i}: {e}")
-                continue
+                    self.logger.warning(f"Parallel optimization failed ({e}), falling back to sequential")
+                results = self._optimize_sequential(train_data, param_combinations)
+        else:
+            results = self._optimize_sequential(train_data, param_combinations)
         
         if not results:
             raise ValueError("No successful parameter combinations found")
@@ -144,6 +187,94 @@ class ParameterOptimizer:
                 self.logger.info(f"• {param.replace('_', ' ').title()}: {value}")
         
         return best_result
+    
+    def _optimize_parallel(self, data: pd.DataFrame, param_combinations: List[Dict[str, Any]]) -> List[OptimizationResult]:
+        """Run optimization using parallel processing."""
+        results = []
+        
+        # Prepare arguments for parallel processing
+        args_list = [
+            (data, self.strategy.__class__, self.config, params, i)
+            for i, params in enumerate(param_combinations)
+        ]
+        
+        # Use ProcessPoolExecutor for CPU-bound tasks
+        with ProcessPoolExecutor(max_workers=self.opt_config.max_workers) as executor:
+            # Submit all jobs
+            future_to_id = {
+                executor.submit(_optimize_single_combination, args): i 
+                for i, args in enumerate(args_list)
+            }
+            
+            completed = 0
+            no_improvement_count = 0
+            
+            # Process completed futures
+            for future in as_completed(future_to_id):
+                completed += 1
+                result = future.result()
+                
+                if result is not None:
+                    results.append(result)
+                    
+                    # Early stopping check
+                    if self.opt_config.early_stopping and result.sharpe_ratio > self._best_sharpe:
+                        self._best_sharpe = result.sharpe_ratio
+                        no_improvement_count = 0
+                    else:
+                        no_improvement_count += 1
+                    
+                    # Stop early if no improvement
+                    if (self.opt_config.early_stopping and 
+                        no_improvement_count >= self.opt_config.early_stopping_patience and 
+                        len(results) >= 5):  # Minimum 5 results
+                        if self.opt_config.verbose:
+                            self.logger.info(f"Early stopping after {completed} combinations (no improvement)")
+                        break
+                
+                # Progress reporting
+                if self.opt_config.verbose and completed % 5 == 0:
+                    self.logger.info(f"Completed {completed}/{len(param_combinations)} combinations")
+        
+        return results
+    
+    def _optimize_sequential(self, data: pd.DataFrame, param_combinations: List[Dict[str, Any]]) -> List[OptimizationResult]:
+        """Run optimization sequentially with early stopping."""
+        results = []
+        no_improvement_count = 0
+        
+        for i, params in enumerate(param_combinations):
+            try:
+                result = self._run_single_optimization(data, params)
+                result.param_combination = params
+                result.combination_id = i
+                results.append(result)
+                
+                # Early stopping check
+                if self.opt_config.early_stopping and result.sharpe_ratio > self._best_sharpe:
+                    self._best_sharpe = result.sharpe_ratio
+                    no_improvement_count = 0
+                else:
+                    no_improvement_count += 1
+                
+                # Stop early if no improvement
+                if (self.opt_config.early_stopping and 
+                    no_improvement_count >= self.opt_config.early_stopping_patience and 
+                    len(results) >= 5):
+                    if self.opt_config.verbose:
+                        self.logger.info(f"Early stopping after {i + 1} combinations (no improvement)")
+                    break
+                
+                # Progress reporting
+                if self.opt_config.verbose and len(param_combinations) > 10 and (i + 1) % 5 == 0:
+                    self.logger.info(f"Completed {i + 1}/{len(param_combinations)} combinations")
+                    
+            except Exception as e:
+                if self.opt_config.verbose:
+                    self.logger.warning(f"Error with parameter combination {i}: {e}")
+                continue
+        
+        return results
     
     def _create_strategy_with_params(self, params: Dict[str, Any]) -> BaseStrategy:
         """Create a new strategy instance with updated parameters."""
@@ -194,7 +325,8 @@ class ParameterOptimizer:
         try:
             # The strategy expects a dictionary of dataframes, keyed by timeframe.
             # For optimization, we use the first required timeframe as the key.
-            main_tf = temp_strategy.required_timeframes[0]
+            required_tfs = temp_strategy.get_required_timeframes()
+            main_tf = required_tfs[0] if required_tfs else '1h'
             tf_data = {main_tf: data}
             signals: Signals = temp_strategy.generate_signals(tf_data)
             
@@ -206,7 +338,7 @@ class ParameterOptimizer:
             metrics: Dict[str, Union[float, int]] = calc_metrics(portfolio)
             
             return OptimizationResult(
-                portfolio=portfolio,
+                portfolio=portfolio,  # Will be replaced with final portfolio for best result
                 metrics=metrics,
                 sharpe_ratio=float(metrics.get('sharpe', -999)),
                 total_return=metrics.get('total_return', -999),
@@ -219,13 +351,25 @@ class ParameterOptimizer:
             raise
     
     def _select_best_parameters(self, results: List[OptimizationResult]) -> OptimizationResult:
-        """Select best parameters based on Sharpe ratio."""
-        sorted_results = sorted(results, key=lambda x: x.sharpe_ratio, reverse=True)
+        """Select best parameters using composite scoring."""
+        if not results:
+            raise ValueError("No results to select from")
+        
+        # Multi-objective optimization: Sharpe ratio (70%) + Return/Drawdown ratio (30%)
+        for result in results:
+            sharpe_score = result.sharpe_ratio if result.sharpe_ratio > -999 else 0
+            return_dd_ratio = (result.total_return / max(abs(result.max_drawdown), 1)) if result.max_drawdown != 999 else 0
+            result.composite_score = 0.7 * sharpe_score + 0.3 * return_dd_ratio
+        
+        # Sort by composite score
+        sorted_results = sorted(results, key=lambda x: getattr(x, 'composite_score', x.sharpe_ratio), reverse=True)
         best = sorted_results[0]
         
-        self.logger.info(f"Best Sharpe Ratio: {best.sharpe_ratio:.3f}")
-        self.logger.info(f"Best Total Return: {best.total_return:.2f}%")
-        self.logger.info(f"Best Max Drawdown: {best.max_drawdown:.2f}%")
+        if self.opt_config.verbose:
+            self.logger.info(f"Best Sharpe Ratio: {best.sharpe_ratio:.3f}")
+            self.logger.info(f"Best Total Return: {best.total_return:.2f}%")
+            self.logger.info(f"Best Max Drawdown: {best.max_drawdown:.2f}%")
+            self.logger.info(f"Tested {len(results)} combinations")
         
         return best
 
@@ -303,7 +447,8 @@ class WalkForwardAnalysis:
         temp_strategy = optimizer._create_strategy_with_params(optimal_params)
         
         try:
-            main_tf = temp_strategy.required_timeframes[0]
+            required_tfs = temp_strategy.get_required_timeframes()
+            main_tf = required_tfs[0] if required_tfs else '1h'
             test_tf_data = {main_tf: test_data}
             test_signals: Signals = temp_strategy.generate_signals(test_tf_data)
             test_portfolio: vbt.Portfolio = run_backtest(test_data, test_signals)
@@ -384,7 +529,8 @@ class MonteCarloAnalysis:
             
         self.logger.info(f"Running Monte Carlo analysis with {self.opt_config.num_mc_runs} simulations")
         
-        main_tf = self.strategy.required_timeframes[0] if self.strategy.required_timeframes else '1h'
+        required_tfs = self.strategy.get_required_timeframes()
+        main_tf = required_tfs[0] if required_tfs else '1h'
         tf_data = {main_tf: data}
         base_signals: Signals = self.strategy.generate_signals(tf_data)
         base_portfolio: vbt.Portfolio = run_backtest(data, base_signals)

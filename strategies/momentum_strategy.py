@@ -7,7 +7,7 @@ Simple momentum strategy with multi-timeframe trend confirmation.
 from typing import Dict, List, Any
 import pandas as pd
 import pandas_ta as ta
-from base import BaseStrategy, Signals
+from base import BaseStrategy, Signals, StrategyConfig
 
 
 class MomentumStrategy(BaseStrategy):
@@ -20,7 +20,7 @@ class MomentumStrategy(BaseStrategy):
         risk_factor: Risk multiplier for position sizing (default: 1.0)
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: StrategyConfig):
         """Initialize Momentum strategy with configuration."""
         super().__init__(config)
         self.data = {}
@@ -38,7 +38,7 @@ class MomentumStrategy(BaseStrategy):
     
     def get_required_timeframes(self) -> List[str]:
         """Get timeframes required for strategy calculations."""
-        return ['1h']  # Default required timeframe
+        return self.get_parameter('required_timeframes', ['1h'])
     
     def get_required_columns(self) -> List[str]:
         """Get columns required for strategy calculations."""

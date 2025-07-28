@@ -4,14 +4,14 @@ Trading Strategies Package
 Contains all trading strategy implementations.
 """
 
-from .tdi_strategy import LTIStrategy
+from .tdi_strategy import TDIStrategy
 from .momentum_strategy import MomentumStrategy
 from .orb_strategy import ORBStrategy
 
 # Strategy registry for dynamic loading
 STRATEGY_REGISTRY = {
     strategy.__name__.lower().replace('strategy', ''): strategy 
-    for strategy in [LTIStrategy, MomentumStrategy, ORBStrategy]
+    for strategy in [TDIStrategy, MomentumStrategy, ORBStrategy]
 }
 
 def get_strategy_class(strategy_name: str):

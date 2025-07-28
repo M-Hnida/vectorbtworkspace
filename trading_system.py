@@ -8,15 +8,17 @@ import os
 import traceback
 import warnings
 from typing import Dict, Any, List
+import multiprocessing as mp
 
 import pandas as pd
 
-
 from core_components import run_backtest
-from data_manager import load_data,DataManager
+from data_manager import load_data_for_strategy, load_strategy_config
 from metrics import calc_metrics, print_metrics
 from optimizer import ParameterOptimizer, WalkForwardAnalysis, MonteCarloAnalysis
+from strategies import tdi_strategy, momentum_strategy, orb_strategy
 from plotter import TradingVisualizer
+from base import StrategyConfig
 
 # Constants
 DEFAULT_SPLIT_RATIO = 0.7
@@ -41,23 +43,39 @@ warnings.filterwarnings("ignore")
 class TradingSystem:
     """Main trading system that orchestrates the complete analysis pipeline."""
     
-    def __init__(self, strategy_name: str = None, symbol: str = None):
-        """Initialize trading system with strategy and symbol."""
-        self.strategy_name = strategy_name or 'momentum'
-        self.symbol = symbol or DataManager().defaults.get('symbol', 'EURUSD')  # Using default from config
+    def __init__(self, strategy_name: str = None, symbol: str = None, 
+                 time_range: str = None, end_date: str = None):
+        """Initialize trading system with strategy and symbol.
         
-        # Initialize strategy
-        self.strategy_config = {
-            'name': self.strategy_name,
-            'symbol': self.symbol,
-            # Add any strategy-specific parameters here from config if needed
-        }
+        Args:
+            strategy_name: Name of the strategy to use
+            symbol: Trading symbol (extracted from data files)
+            time_range: Time range for analysis (e.g., '2y', '6m', '1y')
+            end_date: End date for the time range (defaults to most recent data)
+        """
+        self.strategy_name = strategy_name or 'momentum'
+        self.symbol = symbol or 'EURUSD'  # Using default symbol
+        self.time_range = time_range
+        self.end_date = end_date
+        
+        # Load strategy configuration from YAML
+        self.config_dict = load_strategy_config(self.strategy_name)
+        
+        # Create StrategyConfig object
+        self.strategy_config = StrategyConfig(
+            name=self.config_dict.get('name', self.strategy_name),
+            parameters=self.config_dict.get('parameters', {}),
+            optimization_grid=self.config_dict.get('optimization_grid', {}),
+            analysis_settings=self.config_dict.get('analysis_settings', {}),
+            data_requirements=self.config_dict.get('data_requirements', {})
+        )
+        
         self.strategy = self._init_strategy()
         
     def _init_strategy(self):
         """Initialize strategy based on name."""
         strategies = {
-            'lti': lti_strategy.LTIStrategy,
+            'tdi': tdi_strategy.TDIStrategy,
             'momentum': momentum_strategy.MomentumStrategy,
             'orb': orb_strategy.ORBStrategy
         }
@@ -65,11 +83,15 @@ class TradingSystem:
         if self.strategy_name not in strategies:
             raise ValueError(f"Unknown strategy: {self.strategy_name}")
             
-        return strategies[self.strategy_name](self.strategy_config)  # Pass config to strategy
+        return strategies[self.strategy_name](self.strategy_config)
     
-    def run_complete_analysis(self, data: Dict[str, Dict[str, pd.DataFrame]]) -> Dict[str, Any]:
+    def run_complete_analysis(self) -> Dict[str, Any]:
         """Run complete trading system analysis pipeline."""
         results = {}
+
+        # Load data for the strategy with time range control
+        print(f"📊 Loading data with time range: {self.time_range or 'full dataset'}")
+        data = load_data_for_strategy(self.strategy, self.time_range, self.end_date)
         
         try:
             # Step 1: Parameter Optimization
@@ -108,8 +130,8 @@ class TradingSystem:
     
     def _get_primary_data(self, data: Dict[str, Dict[str, pd.DataFrame]]) -> tuple:
         """Get primary symbol and timeframe data for analysis."""
-        primary_symbol = getattr(self.strategy_config, 'primary_symbol', list(data.keys())[0])
-        primary_timeframe = getattr(self.strategy_config, 'primary_timeframe', list(data[primary_symbol].keys())[0])
+        primary_symbol = self.strategy_config.parameters.get('primary_symbol', list(data.keys())[0])
+        primary_timeframe = self.strategy_config.parameters.get('primary_timeframe', list(data[primary_symbol].keys())[0])
         primary_data = data[primary_symbol][primary_timeframe]
         return primary_symbol, primary_timeframe, primary_data
 
@@ -119,14 +141,21 @@ class TradingSystem:
 
         print(f"🎯 Optimizing on {primary_symbol} {primary_timeframe} ({len(optimization_data)} bars)")
         
-        # Get split ratio from config
-        split_ratio = getattr(self.strategy_config, 'split_ratio', DEFAULT_SPLIT_RATIO)
+        # Get optimization config from strategy config
+        from optimizer import OptimizationConfig
+        opt_settings = self.strategy_config.analysis_settings.get('optimization', {})
+        opt_config = OptimizationConfig(
+            enable_parallel=opt_settings.get('enable_parallel', True),
+            max_workers=opt_settings.get('max_workers', min(4, mp.cpu_count())),
+            early_stopping=opt_settings.get('early_stopping', True),
+            early_stopping_patience=opt_settings.get('early_stopping_patience', 10)
+        )
         
-        optimizer = ParameterOptimizer(self.strategy, self.strategy_config)
-        optimization_result = optimizer.optimize(optimization_data, split_ratio=split_ratio)
+        optimizer = ParameterOptimizer(self.strategy, self.strategy_config, opt_config)
+        optimization_result = optimizer.optimize(optimization_data)
         
-        if 'param_combination' in optimization_result:
-            self.strategy.parameters.update(optimization_result['param_combination'])
+        if optimization_result.param_combination:
+            self.strategy.config.parameters.update(optimization_result.param_combination)
             print("✅ Strategy updated with optimal parameters")
         
         return optimization_result
@@ -138,7 +167,8 @@ class TradingSystem:
             print(f"📊 Walk-forward analysis on {primary_symbol} {primary_timeframe}")
             
             wf_analyzer = WalkForwardAnalysis(self.strategy, self.strategy_config)
-            return wf_analyzer.run_analysis(wf_data)
+            result = wf_analyzer.run_analysis(wf_data)
+            return result.__dict__ if hasattr(result, '__dict__') else result
             
         except Exception as e:
             print(f"⚠️ Walk-forward analysis failed: {e}")
@@ -151,7 +181,8 @@ class TradingSystem:
             print(f"🎲 Monte Carlo analysis on {primary_symbol} {primary_timeframe}")
             
             mc_analyzer = MonteCarloAnalysis(self.strategy)
-            return mc_analyzer.run_analysis(mc_data)
+            result = mc_analyzer.run_analysis(mc_data)
+            return result.__dict__ if hasattr(result, '__dict__') else result
             
         except Exception as e:
             print(f"⚠️ Monte Carlo analysis failed: {e}")
@@ -167,7 +198,7 @@ class TradingSystem:
             
             # For multi-timeframe strategies, run backtest on the primary (entry) timeframe
             # but provide all timeframes to the strategy
-            required_tfs = getattr(self.strategy, 'required_timeframes', list(timeframes.keys()))
+            required_tfs = self.strategy.get_required_timeframes()
             
             if len(required_tfs) > 1:
                 # Multi-timeframe strategy - use primary timeframe for backtest
@@ -294,29 +325,15 @@ def get_available_strategies() -> List[str]:
     
     return strategies
 
-def run_strategy_pipeline(strategy_name: str) -> Dict[str, Any]:
+def run_strategy_pipeline(strategy_name: str, time_range: str = None, end_date: str = None) -> Dict[str, Any]:
     """Run complete strategy pipeline with all features."""
     try:
         print(f"\n🚀 Starting {strategy_name} strategy pipeline...")
         
-        trading_system = TradingSystem(strategy_name)
+        trading_system = TradingSystem(strategy_name, time_range=time_range, end_date=end_date)
         
         print("📊 Loading market data...")
-        # Extract data requirements from strategy config
-        data_requirements = getattr(trading_system.strategy_config, 'data_requirements', {})
-        
-        # Use existing load_data function with parameters from config
-        data = load_data(
-            symbols=data_requirements.get('symbols'),
-            timeframes=data_requirements.get('timeframes'),
-            symbol_group=data_requirements.get('symbol_group'),
-            max_symbols=data_requirements.get('max_symbols')
-        )
-        
-        if not data:
-            return {"success": False, "error": "No data loaded"}
-        
-        results = trading_system.run_complete_analysis(data)
+        results = trading_system.run_complete_analysis()
         
         return {"success": True, "results": results}
         
@@ -349,12 +366,67 @@ def main():
         print("❌ Invalid selection")
         return
 
-    results = run_strategy_pipeline(strategy_name)
+    # Ask for time range preference
+    print("\n📅 Time Range Options:")
+    print("1. Full dataset (default)")
+    print("2. Last 2 years")
+    print("3. Last 1 year")
+    print("4. Last 6 months")
+    print("5. Last 3 months")
+    print("6. Custom time range")
+    
+    time_range = None
+    end_date = None
+    
+    try:
+        time_choice = input("\nSelect time range (press Enter for full dataset): ").strip()
+        if time_choice == '2':
+            time_range = '2y'
+        elif time_choice == '3':
+            time_range = '1y'
+        elif time_choice == '4':
+            time_range = '6m'
+        elif time_choice == '5':
+            time_range = '3m'
+        elif time_choice == '6':
+            custom_range = input("Enter time range (e.g., '18m', '2y', '90d'): ").strip()
+            if custom_range:
+                time_range = custom_range
+            custom_end = input("Enter end date (YYYY-MM-DD, press Enter for most recent): ").strip()
+            if custom_end:
+                end_date = custom_end
+    except Exception as e:
+        print(f"⚠️ Invalid time range input: {e}, using full dataset")
+
+    results = run_strategy_pipeline(strategy_name, time_range, end_date)
 
     if results["success"]:
         print("\n✅ Strategy pipeline completed successfully!")
     else:
         print(f"\n❌ Strategy pipeline failed: {results['error']}")
+
+def run_strategy_with_time_range(strategy_name: str, time_range: str = None, 
+                                end_date: str = None, symbol: str = None) -> Dict[str, Any]:
+    """Convenience function to run a strategy with specific time range parameters.
+    
+    Args:
+        strategy_name: Name of the strategy to run
+        time_range: Time range specification (e.g., '2y', '6m', '1y', '3m')
+        end_date: End date for the time range (YYYY-MM-DD format)
+        symbol: Trading symbol (optional, extracted from data files)
+    
+    Returns:
+        Dictionary containing analysis results
+    
+    Example:
+        # Run momentum strategy on last 2 years of data
+        results = run_strategy_with_time_range('momentum', '2y')
+        
+        # Run with custom end date
+        results = run_strategy_with_time_range('orb', '1y', '2024-12-31')
+    """
+    return run_strategy_pipeline(strategy_name, time_range, end_date)
+
 
 if __name__ == "__main__":
     main()

@@ -29,8 +29,8 @@ optimization_grid:
   atr_multiple: [1.0, 1.5, 2.0]
 
 csv_path: 
-    - "data/EURUSD_1h.csv"
-    - "data/EURUSD_15m.csv"
+  - "data/EURUSD_15m.csv"
+  - "data/EURUSD_1H_2009-2025.csv"
 
 
 # ------------------------------------------------------------
@@ -38,3 +38,9 @@ csv_path:
 # ------------------------------------------------------------
 analysis_settings:
   monte_carlo_runs: 50
+  # Optimization settings
+  optimization:
+    enable_parallel: false  # Disable parallel processing for ORB due to serialization issues
+    max_workers: 1
+    early_stopping: true
+    early_stopping_patience: 5
