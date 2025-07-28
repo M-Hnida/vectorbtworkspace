@@ -124,92 +124,74 @@ class AnalysisPipeline:
             raise
 
 
-class DataProcessor:
-    """Handles data processing and primary data extraction."""
-    
-    @staticmethod
-    def get_primary_data(data: Dict[str, Dict[str, pd.DataFrame]], 
-                        strategy_config: StrategyConfig) -> tuple:
-        """Get primary symbol and timeframe data for analysis.
-        
-        Args:
-            data: Multi-timeframe data dictionary
-            strategy_config: Strategy configuration
-            
-        Returns:
-            Tuple of (primary_symbol, primary_timeframe, primary_data)
-        """
-        primary_symbol = strategy_config.parameters.get('primary_symbol', list(data.keys())[0])
-        primary_timeframe = strategy_config.parameters.get('primary_timeframe', 
-                                                          list(data[primary_symbol].keys())[0])
-        primary_data = data[primary_symbol][primary_timeframe]
-        return primary_symbol, primary_timeframe, primary_data
-    
-    @staticmethod
-    def validate_data_structure(data: Dict[str, Dict[str, pd.DataFrame]]) -> None:
-        """Validate multi-timeframe data structure.
-        
-        Args:
-            data: Multi-timeframe data dictionary
-            
-        Raises:
-            ValueError: If data structure is invalid
-        """
-        if not isinstance(data, dict) or not data:
-            raise ValueError("Data must be a non-empty dictionary")
-        
-        for symbol, timeframes in data.items():
-            if not isinstance(timeframes, dict) or not timeframes:
-                raise ValueError(f"Timeframes for {symbol} must be a non-empty dictionary")
-            
-            for tf, df in timeframes.items():
-                if not isinstance(df, pd.DataFrame) or df.empty:
-                    raise ValueError(f"Data for {symbol} {tf} must be a non-empty DataFrame")
+# ============================================================================
+# DATA PROCESSING FUNCTIONS (Simplified from DataProcessor class)
+# ============================================================================
+
+def get_primary_data(data: Dict[str, Dict[str, pd.DataFrame]],
+                    strategy_config: StrategyConfig) -> tuple:
+    """Get primary symbol and timeframe data for analysis.
+
+    Args:
+        data: Multi-timeframe data dictionary
+        strategy_config: Strategy configuration
+
+    Returns:
+        Tuple of (primary_symbol, primary_timeframe, primary_data)
+    """
+    primary_symbol = strategy_config.parameters.get('primary_symbol', list(data.keys())[0])
+    primary_timeframe = strategy_config.parameters.get('primary_timeframe',
+                                                      list(data[primary_symbol].keys())[0])
+    primary_data = data[primary_symbol][primary_timeframe]
+    return primary_symbol, primary_timeframe, primary_data
 
 
-class StrategyManager:
-    """Manages strategy initialization and configuration."""
-    
-    @staticmethod
-    def create_strategy(strategy_name: str, strategy_config: StrategyConfig) -> BaseStrategy:
-        """Create strategy instance from name and configuration.
-        
-        Args:
-            strategy_name: Name of the strategy
-            strategy_config: Strategy configuration
-            
-        Returns:
-            Strategy instance
-            
-        Raises:
-            ValueError: If strategy cannot be created
-        """
-        from strategies import get_strategy_class
-        
-        try:
-            strategy_class = get_strategy_class(strategy_name)
-            return strategy_class(strategy_config)
-        except ValueError as e:
-            raise ValueError(f"Unknown strategy: {strategy_name}. {e}") from e
-    
-    @staticmethod
-    def load_strategy_config(strategy_name: str) -> StrategyConfig:
-        """Load strategy configuration from file.
-        
-        Args:
-            strategy_name: Name of the strategy
-            
-        Returns:
-            StrategyConfig object
-        """
-        from data_manager import load_strategy_config
-        
-        config_dict = load_strategy_config(strategy_name)
-        
-        return StrategyConfig(
-            name=config_dict.get('name', strategy_name),
-            parameters=config_dict.get('parameters', {}),
-            optimization_grid=config_dict.get('optimization_grid', {}),
-            analysis_settings=config_dict.get('analysis_settings', {}),
-            data_requirements=config_dict.get('data_requirements', {})
-        )
+def validate_data_structure(data: Dict[str, Dict[str, pd.DataFrame]]) -> None:
+    """Validate multi-timeframe data structure.
+
+    Args:
+        data: Multi-timeframe data dictionary
+
+    Raises:
+        ValueError: If data structure is invalid
+    """
+    if not isinstance(data, dict) or not data:
+        raise ValueError("Data must be a non-empty dictionary")
+
+    for symbol, timeframes in data.items():
+        if not isinstance(timeframes, dict) or not timeframes:
+            raise ValueError(f"Timeframes for {symbol} must be a non-empty dictionary")
+
+        for tf, df in timeframes.items():
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                raise ValueError(f"Data for {symbol} {tf} must be a non-empty DataFrame")
+
+
+# ============================================================================
+# STRATEGY MANAGEMENT FUNCTIONS (Simplified from StrategyManager class)
+# ============================================================================
+
+def create_strategy(strategy_name: str, strategy_config: StrategyConfig) -> BaseStrategy:
+    """Create functional strategy instance from name and configuration.
+
+    Args:
+        strategy_name: Name of the strategy
+        strategy_config: Strategy configuration
+
+    Returns:
+        Functional strategy instance
+
+    Raises:
+        ValueError: If strategy cannot be created
+    """
+    from strategies import get_strategy_class
+
+    try:
+        strategy_factory = get_strategy_class(strategy_name)
+        return strategy_factory(strategy_config)
+    except ValueError as e:
+        raise ValueError(f"Unknown strategy: {strategy_name}. {e}") from e
+
+
+# Note: load_strategy_config functionality is already available in core_components.py
+# Use: from core_components import load_strategy_config

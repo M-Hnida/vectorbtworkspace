@@ -18,23 +18,79 @@ TIMEFRAMES = {
 
 def load_ohlc_csv(file_path: str) -> pd.DataFrame:
     """Load and clean OHLC CSV data."""
-    # Read file, auto-detect separator, no headers
+    # First, try to detect if the file has headers by reading the first few lines
     try:
-        df = pd.read_csv(file_path, sep=None, header=None, parse_dates=[0], index_col=0, 
-                         date_format='mixed', engine='python')
+        # Read first line to check for headers
+        with open(file_path, 'r') as f:
+            first_line = f.readline().strip()
+
+        # Check if first line looks like headers (contains text like 'open', 'time', etc.)
+        has_headers = any(keyword in first_line.lower() for keyword in
+                         ['open', 'high', 'low', 'close', 'time', 'date', 'timestamp'])
+
+        # Try reading with headers first if detected
+        if has_headers:
+            try:
+                df = pd.read_csv(file_path, sep=None, header=0, parse_dates=[0], index_col=0,
+                                date_format='mixed', engine='python')
+            except Exception:
+                # If that fails, try without parse_dates
+                df = pd.read_csv(file_path, sep=None, header=0, index_col=0, engine='python')
+        else:
+            # Try reading without headers
+            try:
+                df = pd.read_csv(file_path, sep=None, header=None, parse_dates=[0], index_col=0,
+                                date_format='mixed', engine='python')
+            except Exception:
+                # If that fails, try without parse_dates
+                df = pd.read_csv(file_path, sep=None, header=None, index_col=0, engine='python')
+
     except pd.errors.EmptyDataError as exc:
         raise ValueError("File is empty or could not be parsed") from exc
-    
+    except Exception as exc:
+        raise ValueError(f"Could not parse CSV file {file_path}: {exc}") from exc
+
+    # Ensure index is datetime
+    if not isinstance(df.index, pd.DatetimeIndex):
+        try:
+            df.index = pd.to_datetime(df.index, errors='coerce')
+            df = df[df.index.notna()]
+        except Exception as exc:
+            raise ValueError(f"Could not convert index to datetime in {file_path}: {exc}") from exc
+
     # Standard column names (take what we need, ignore extras)
     columns = ['open', 'high', 'low', 'close', 'volume']
-    df.columns = columns[:len(df.columns)]
-    
+
+    # If we have headers, try to map them to standard names
+    if has_headers and len(df.columns) > 0:
+        # Create a mapping from existing columns to standard names
+        column_mapping = {}
+        existing_cols = [col.lower() for col in df.columns]
+
+        for i, std_col in enumerate(columns):
+            if i < len(df.columns):
+                # Try to find a matching column name
+                for j, existing_col in enumerate(existing_cols):
+                    if std_col in existing_col or existing_col in std_col:
+                        column_mapping[df.columns[j]] = std_col
+                        break
+                else:
+                    # If no match found, use positional mapping
+                    if i < len(df.columns):
+                        column_mapping[df.columns[i]] = std_col
+
+        # Apply the mapping
+        df = df.rename(columns=column_mapping)
+    else:
+        # No headers, use positional mapping
+        df.columns = columns[:len(df.columns)]
+
     # Validate required columns
     required_columns = ['open', 'high', 'low', 'close']
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
-    
+
     # Return OHLC (+ volume if available)
     available = [col for col in columns if col in df.columns]
     return df[available].dropna().sort_index()
@@ -253,10 +309,20 @@ def _harmonize_time_ranges(dataframes: Dict[str, pd.DataFrame],
     for tf, df in dataframes.items():
         if df.empty:
             continue
-            
+
+        # Ensure the dataframe has a proper datetime index
+        if not isinstance(df.index, pd.DatetimeIndex):
+            try:
+                df.index = pd.to_datetime(df.index, errors='coerce')
+                df = df[df.index.notna()]
+                dataframes[tf] = df  # Update the dataframe in the dictionary
+            except Exception as e:
+                print(f"⚠️ Could not convert {tf} index to datetime: {e}")
+                continue
+
         df_start = df.index.min()
         df_end = df.index.max()
-        
+
         if earliest_start is None or df_start > earliest_start:
             earliest_start = df_start
         if latest_end is None or df_end < latest_end:
@@ -281,9 +347,21 @@ def _harmonize_time_ranges(dataframes: Dict[str, pd.DataFrame],
     if time_range:
         time_delta = _parse_time_range(time_range)
         if time_delta:
-            actual_start_date = actual_end_date - time_delta
-            # Don't go before available data
-            actual_start_date = max(actual_start_date, earliest_start)
+            # Ensure actual_end_date is a datetime object before subtraction
+            if not isinstance(actual_end_date, (pd.Timestamp, datetime)):
+                try:
+                    actual_end_date = pd.to_datetime(actual_end_date)
+                except Exception as e:
+                    print(f"⚠️ Could not convert end_date to datetime: {e}")
+                    actual_start_date = earliest_start
+                else:
+                    actual_start_date = actual_end_date - time_delta
+                    # Don't go before available data
+                    actual_start_date = max(actual_start_date, earliest_start)
+            else:
+                actual_start_date = actual_end_date - time_delta
+                # Don't go before available data
+                actual_start_date = max(actual_start_date, earliest_start)
         else:
             actual_start_date = earliest_start
     else:

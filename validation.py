@@ -89,9 +89,17 @@ def validate_signals(signals: Signals, data_index: pd.Index, name: str = "Signal
         if series.empty:
             raise ValueError(f"{name}.{series_name} cannot be empty")
         
-        # Check data type
-        if not series.dtype == bool:
-            raise ValueError(f"{name}.{series_name} must be boolean dtype")
+        # Check data type - accept boolean or boolean-compatible types
+        if not (series.dtype == bool or pd.api.types.is_bool_dtype(series)):
+            # Try to convert to boolean if it contains only 0/1 or True/False values
+            try:
+                if series.dtype in ['int64', 'float64'] and set(series.dropna().unique()).issubset({0, 1, True, False}):
+                    # This is acceptable - will be converted to boolean
+                    pass
+                else:
+                    raise ValueError(f"{name}.{series_name} must be boolean or boolean-convertible (0/1), got {series.dtype}")
+            except:
+                raise ValueError(f"{name}.{series_name} must be boolean or boolean-convertible (0/1), got {series.dtype}")
         
         # Check index type
         if not isinstance(series.index, pd.DatetimeIndex):

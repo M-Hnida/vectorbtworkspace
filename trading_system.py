@@ -11,10 +11,10 @@ from typing import Dict, Any, List
 
 import pandas as pd
 
-from core_components import run_backtest
+from core_components import run_backtest, get_available_strategies as get_strategies_from_config, load_strategy_config
 from data_manager import load_data_for_strategy
 from metrics import calc_metrics, print_metrics
-from analysis_pipeline import AnalysisPipeline, DataProcessor, StrategyManager
+from analysis_pipeline import AnalysisPipeline, get_primary_data, create_strategy
 from plotter import TradingVisualizer
 
 # Constants
@@ -58,14 +58,12 @@ class TradingSystem:
         self.skip_optimization = skip_optimization
 
         # Load strategy configuration and create strategy
-        self.strategy_config = StrategyManager.load_strategy_config(self.strategy_name)
-        self.strategy = StrategyManager.create_strategy(self.strategy_name, self.strategy_config)
+        self.strategy_config = load_strategy_config(self.strategy_name)
+        self.strategy = create_strategy(self.strategy_name, self.strategy_config)
 
         # Initialize analysis pipeline
         self.analysis_pipeline = AnalysisPipeline(self.strategy, self.strategy_config)
-        
-
-    
+            
     def run_complete_analysis(self) -> Dict[str, Any]:
         """Run complete trading system analysis pipeline."""
         results = {}
@@ -90,7 +88,7 @@ class TradingSystem:
                 
             else:
                 # Run analysis pipeline
-                _, _, primary_data = DataProcessor.get_primary_data(data, self.strategy_config)
+                _, _, primary_data = get_primary_data(data, self.strategy_config)
                 analysis_results = self.analysis_pipeline.run_complete_analysis(primary_data, self.skip_optimization)
                 results.update(analysis_results)
 
@@ -246,21 +244,8 @@ class TradingSystem:
 # MAIN APPLICATION
 # ============================================================================
 
-def get_available_strategies() -> List[str]:
-    """Get list of available strategies from config directory."""
-    config_dir = 'config'
-    if not os.path.exists(config_dir):
-        return []
-    
-    # Exclude non-strategy config files
-    excluded_files = {'data_sources.yaml', 'global_config.yaml', 'settings.yaml'}
-    
-    strategies = []
-    for filename in os.listdir(config_dir):
-        if filename.endswith('.yaml') and filename not in excluded_files:
-            strategies.append(os.path.splitext(filename)[0])
-    
-    return strategies
+# Use the function from core_components instead of duplicating
+get_available_strategies = get_strategies_from_config
 
 def run_strategy_pipeline(strategy_name: str, time_range: str = None, end_date: str = None, 
                          skip_optimization: bool = False) -> Dict[str, Any]:
@@ -414,9 +399,17 @@ def quick_test(strategy_name: str, time_range: str = '3m', fast_mode: bool = Tru
             for tf, result in timeframes.items():
                 metrics = result['metrics']
                 print(f"\n📊 {symbol} {tf}:")
-                print(f"  Return: {metrics['total_return']:.1f}% | Sharpe: {metrics['sharpe']:.2f}")
-                print(f"  Trades: {metrics['total_trades']} | Win Rate: {metrics['win_rate']:.1f}%")
-                print(f"  Max DD: {metrics['max_drawdown']:.1f}% | Profit Factor: {metrics['profit_factor']:.2f}")
+                # Use safe metric access with defaults
+                total_return = metrics.get('total_return', metrics.get('Total Return [%]', 0))
+                sharpe = metrics.get('sharpe', metrics.get('Sharpe Ratio', 0))
+                total_trades = metrics.get('total_trades', metrics.get('# Trades', 0))
+                win_rate = metrics.get('win_rate', metrics.get('Win Rate [%]', 0))
+                max_dd = metrics.get('max_drawdown', metrics.get('Max Drawdown [%]', 0))
+                profit_factor = metrics.get('profit_factor', 1.0)
+
+                print(f"  Return: {total_return:.1f}% | Sharpe: {sharpe:.2f}")
+                print(f"  Trades: {total_trades} | Win Rate: {win_rate:.1f}%")
+                print(f"  Max DD: {max_dd:.1f}% | Profit Factor: {profit_factor:.2f}")
     else:
         print(f"❌ Test failed: {results['error']}")
 

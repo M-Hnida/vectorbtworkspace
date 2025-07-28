@@ -24,20 +24,35 @@ class Signals:
     def __post_init__(self):
         """
         Validate that at least one signal series is provided and that all provided signal series
-        have the same index.
+        have the same index. Also ensures all signals are properly boolean.
 
         Raises:
             ValueError: If no signal series is provided or if the indexes of the provided series differ.
         """
-        # Collect non-None series
-        series_list = [s for s in [self.entries, self.exits, self.short_entries, self.short_exits] if s is not None]
+        # Collect non-None series and convert to boolean if needed
+        series_list = []
+        for attr_name in ['entries', 'exits', 'short_entries', 'short_exits']:
+            series = getattr(self, attr_name)
+            if series is not None:
+                # Convert to boolean if it's a boolean expression result
+                if not pd.api.types.is_bool_dtype(series):
+                    try:
+                        # Handle numeric 0/1 values or boolean expressions
+                        series = series.astype(bool)
+                        setattr(self, attr_name, series)
+                    except (ValueError, TypeError):
+                        raise ValueError(f"{attr_name} must be boolean or boolean-convertible")
+                series_list.append(series)
+
         if not series_list:
             raise ValueError("At least one signal series must be provided")
+
+        # Check index alignment
         first_index = series_list[0].index
-        for series in series_list[1:]:
+        for i, series in enumerate(series_list[1:], 1):
             if not series.index.equals(first_index):
                 raise ValueError("All provided signal series must have the same index")
-        
+
         # Validate sizes if provided
         if self.sizes is not None and not self.sizes.index.equals(first_index):
             raise ValueError("Sizes series must have the same index as signal series")

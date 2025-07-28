@@ -6,7 +6,7 @@ Contains base classes and core functionality shared across modules.
 
 import os
 import warnings
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, List
 from dataclasses import dataclass
 
 import pandas as pd
@@ -209,53 +209,67 @@ def run_backtest_multi_symbol_timeframe(data: Dict[str, Dict[str, pd.DataFrame]]
 # CONFIGURATION MANAGEMENT
 # ============================================================================
 
-class ConfigManager:
-    """Manages strategy configuration loading with centralized error handling."""
+def load_strategy_config(strategy_name: str, config_dir: str = DEFAULT_CONFIG_DIR) -> StrategyConfig:
+    """Load strategy configuration from YAML file.
 
-    def __init__(self, config_dir: str = DEFAULT_CONFIG_DIR):
-        self.config_dir = config_dir
-        self._validate_config_directory()
+    Args:
+        strategy_name: Name of the strategy configuration to load
+        config_dir: Directory containing configuration files
 
-    def _validate_config_directory(self) -> None:
-        """Validate that config directory exists."""
-        if not os.path.exists(self.config_dir):
-            raise FileNotFoundError(f"Configuration directory not found: {self.config_dir}")
+    Returns:
+        StrategyConfig object with loaded configuration
 
-    def load_config(self, strategy_name: str) -> StrategyConfig:
-        """Load strategy configuration from YAML file.
-        
-        Args:
-            strategy_name: Name of the strategy configuration to load
-            
-        Returns:
-            StrategyConfig object with loaded configuration
-            
-        Raises:
-            ValueError: If strategy name is invalid
-            FileNotFoundError: If configuration file doesn't exist
-            yaml.YAMLError: If YAML parsing fails
-        """
-        if not strategy_name or not strategy_name.strip():
-            raise ValueError("Strategy name cannot be empty")
-            
-        config_path = os.path.join(self.config_dir, f"{strategy_name}.yaml")
+    Raises:
+        ValueError: If strategy name is invalid
+        FileNotFoundError: If configuration file doesn't exist
+        yaml.YAMLError: If YAML parsing fails
+    """
+    if not strategy_name or not strategy_name.strip():
+        raise ValueError("Strategy name cannot be empty")
 
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    if not os.path.exists(config_dir):
+        raise FileNotFoundError(f"Configuration directory not found: {config_dir}")
 
-        try:
-            with open(config_path, 'r', encoding=DEFAULT_ENCODING) as file:
-                config_data = yaml.safe_load(file)
-        except yaml.YAMLError as e:
-            raise yaml.YAMLError(f"Failed to parse YAML configuration: {e}") from e
+    config_path = os.path.join(config_dir, f"{strategy_name}.yaml")
 
-        if config_data is None:
-            config_data = {}
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-        return StrategyConfig(
-            name=strategy_name,
-            parameters=config_data.get('parameters', {}),
-            optimization_grid=config_data.get('optimization_grid', {}),
-            analysis_settings=config_data.get('analysis_settings', {}),
-            data_requirements=config_data.get('data_requirements', {})
-        )
+    try:
+        with open(config_path, 'r', encoding=DEFAULT_ENCODING) as file:
+            config_data = yaml.safe_load(file)
+    except yaml.YAMLError as e:
+        raise yaml.YAMLError(f"Failed to parse YAML configuration: {e}") from e
+
+    if config_data is None:
+        config_data = {}
+
+    return StrategyConfig(
+        name=strategy_name,
+        parameters=config_data.get('parameters', {}),
+        optimization_grid=config_data.get('optimization_grid', {}),
+        analysis_settings=config_data.get('analysis_settings', {}),
+        data_requirements=config_data.get('data_requirements', {})
+    )
+
+def get_available_strategies(config_dir: str = DEFAULT_CONFIG_DIR) -> List[str]:
+    """Get list of available strategies from config directory.
+
+    Args:
+        config_dir: Directory containing configuration files
+
+    Returns:
+        List of strategy names
+    """
+    if not os.path.exists(config_dir):
+        return []
+
+    # Exclude non-strategy config files
+    excluded_files = {'data_sources.yaml', 'global_config.yaml', 'settings.yaml'}
+
+    strategies = []
+    for filename in os.listdir(config_dir):
+        if filename.endswith('.yaml') and filename not in excluded_files:
+            strategies.append(os.path.splitext(filename)[0])
+
+    return strategies
