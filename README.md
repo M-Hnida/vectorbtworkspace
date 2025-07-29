@@ -69,19 +69,7 @@ A robust and comprehensive trading strategy analysis framework with advanced bac
 │   ├── EURUSD_1H_2009-2025.csv
 │   ├── EURUSD_1D_2009-2025.csv
 │   └── EURUSD_4H_2009-2025.csv
-├── cache/              # Cached processed data (auto-generated)
-│   ├── BTCUSD_1h.pkl
-│   └── EURUSD_1h.pkl
-└── tests/              # Test suite
-    ├── test_core_components.py
-    ├── test_data_manager.py
-    ├── test_optimizer.py
-    ├── test_plotter.py
-    ├── test_lti_strategy.py
-    ├── test_momentum_strategy.py
-    ├── test_orb_strategy.py
-    ├── test_vectorbt_strategy.py
-    └── test_time_range.py
+
 ```
 
 ## Strategy Configuration
@@ -175,82 +163,7 @@ Example: If you have EURUSD_1H_2009-2025.csv and EURUSD_4H_2009-2025.csv, specif
 
 ## 🔧 Adding New Strategies
 
-### Step-by-Step Guide
-
-#### 1. Create Strategy Class
-Create a new Python file in the `strategies/` directory (e.g., `my_strategy.py`):
-
-```python
-from typing import Dict, List
-import pandas as pd
-from base import BaseStrategy, Signals, StrategyConfig
-
-class MyStrategy(BaseStrategy):
-    """Your custom strategy description."""
-
-    def __init__(self, config: StrategyConfig):
-        super().__init__(config)
-        # Initialize strategy-specific parameters
-        self.param1 = self.get_parameter('param1', default_value)
-        self.param2 = self.get_parameter('param2', default_value)
-
-    def generate_signals(self, tf_data: Dict[str, pd.DataFrame]) -> Signals:
-        """Generate trading signals from market data."""
-        # Get the main timeframe data
-        main_tf = self.get_required_timeframes()[0]
-        df = tf_data[main_tf]
-
-        # Calculate indicators (example with pandas_ta)
-        import pandas_ta as ta
-        df['ema_21'] = ta.ema(df['close'], length=21)
-        df['ema_50'] = ta.ema(df['close'], length=50)
-        df['rsi'] = ta.rsi(df['close'], length=14)
-
-        # Generate signals using boolean expressions
-        # These expressions automatically create boolean Series
-        entries = (df['ema_21'] > df['ema_50']) & (df['rsi'] < 70)
-        exits = (df['ema_21'] < df['ema_50']) | (df['rsi'] > 80)
-
-        # Multi-timeframe example (if using multiple timeframes)
-        if len(tf_data) > 1:
-            # Get higher timeframe for trend filter
-            higher_tf = self.get_required_timeframes()[1] if len(self.get_required_timeframes()) > 1 else main_tf
-            df_higher = tf_data[higher_tf]
-            df_higher['ema_100'] = ta.ema(df_higher['close'], length=100)
-            df_higher['ema_200'] = ta.ema(df_higher['close'], length=200)
-
-            # Resample higher timeframe to main timeframe
-            trend_filter = (df_higher['ema_100'] > df_higher['ema_200']).reindex(df.index, method='ffill')
-
-            # Apply trend filter to entries
-            entries = entries & trend_filter
-
-        return Signals(entries=entries, exits=exits)
-
-    def get_required_timeframes(self) -> List[str]:
-        """Return required timeframes for this strategy."""
-        return ['1h']  # Adjust as needed
-
-    def get_required_columns(self) -> List[str]:
-        """Return required data columns."""
-        return ['open', 'high', 'low', 'close']  # Add volume if needed
-```
-
-#### 2. Register Strategy
-Add your strategy to `strategies/__init__.py`:
-
-```python
-from .my_strategy import MyStrategy
-
-# Add to the imports and registry
-STRATEGY_REGISTRY = {
-    strategy.__name__.lower().replace('strategy', ''): strategy
-    for strategy in [TDIStrategy, MomentumStrategy, ORBStrategy, VectorBTStrategy, MyStrategy]
-}
-
-__all__ = ['TDIStrategy', 'MomentumStrategy', 'ORBStrategy', 'VectorBTStrategy', 'MyStrategy', ...]
-```
-
+#
 #### 3. Create Configuration File
 Create `config/my.yaml`:
 
@@ -338,7 +251,6 @@ The analysis pipeline is modular and can be customized by modifying the `Trading
 The system is optimized for performance with:
 - **Vectorized Operations**: Using pandas and numpy for fast computations
 - **Parallel Processing**: Monte Carlo simulations run in parallel
-- **Data Caching**: Processed data is cached in `cache/` directory as pickle files
 - **Efficient Data Structures**: Minimal memory footprint with optimized data handling
 - **VectorBT Integration**: High-performance backtesting engine for rapid analysis
 
@@ -373,7 +285,6 @@ Core libraries (see `requirements.txt`):
 - **joblib>=1.0.0**: Parallel computing support
 
 Development tools:
-- **pytest**: Testing framework (for running tests)
 - **black**: Code formatting (optional)
 - **mypy**: Static type checking (optional)
 

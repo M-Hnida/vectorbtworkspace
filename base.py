@@ -1,12 +1,7 @@
 import pandas as pd
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from enum import Enum
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class TimeFrame(Enum):
     M1, M5, M15, H1, H4, D1 = "1m", "5m", "15m", "1h", "4h", "1d"
@@ -40,7 +35,7 @@ class Signals:
                         # Handle numeric 0/1 values or boolean expressions
                         series = series.astype(bool)
                         setattr(self, attr_name, series)
-                    except (ValueError, TypeError):
+                    except :
                         raise ValueError(f"{attr_name} must be boolean or boolean-convertible")
                 series_list.append(series)
 
@@ -49,7 +44,7 @@ class Signals:
 
         # Check index alignment
         first_index = series_list[0].index
-        for i, series in enumerate(series_list[1:], 1):
+        for series in series_list[1:]:
             if not series.index.equals(first_index):
                 raise ValueError("All provided signal series must have the same index")
 
@@ -83,60 +78,3 @@ class StrategyConfig:
         if self.required_columns is None:
             self.required_columns = ['open', 'high', 'low', 'close']
 
-
-class StrategyError(Exception):
-    """Strategy-specific exception."""
-    pass
-
-
-class BaseStrategy(ABC):
-    """Abstract base class for trading strategies."""
-
-    def __init__(self, config: StrategyConfig):
-        self.config = config
-        self._logger = logging.getLogger(f"{__name__}.{config.name}")
-
-    @property
-    def name(self) -> str:
-        return self.config.name
-
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return self.config.parameters
-
-    @abstractmethod
-    def generate_signals(self, tf_data: Dict[str, pd.DataFrame]) -> Signals:
-        """Generate trading signals."""
-        pass
-
-    def get_required_columns(self) -> List[str]:
-        return self.config.required_columns
-
-    def get_parameter(self, key: str, default: Any = None) -> Any:
-        return self.parameters.get(key, default)
-
-    def get_required_timeframes(self) -> List[str]:
-        return ['1h']  # Default timeframe
-
-    def validate_data(self, tf_data: Dict[str, pd.DataFrame]) -> None:
-        """Basic data validation."""
-        if not tf_data:
-            raise StrategyError("Empty data provided")
-
-        for tf, df in tf_data.items():
-            if df.empty:
-                raise StrategyError(f"Empty dataframe for {tf}")
-
-            missing = set(self.get_required_columns()) - set(df.columns)
-            if missing:
-                raise StrategyError(f"Missing columns in {tf}: {missing}")
-
-    def execute(self, tf_data: Dict[str, pd.DataFrame]) -> Signals:
-        """Execute strategy with validation."""
-        self.validate_data(tf_data)
-        self._last_tf_data = tf_data  # For multi-timeframe check
-
-        try:
-            return self.generate_signals(tf_data)
-        except Exception as e:
-            raise StrategyError(f"Signal generation failed: {e}") from e

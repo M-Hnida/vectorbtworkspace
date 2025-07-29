@@ -1,14 +1,13 @@
 """
-VectorBT Bollinger Bands Mean Reversion Strategy
+VectorBT Bollinger Bands Mean Reversion Strategy - Pure Functional Implementation
 
 Clean implementation focused on signal generation and configuration.
-Follows the codebase pattern with both functional and class-based interfaces.
 """
 
 import pandas as pd
 import pandas_ta as ta
 from typing import Dict, List
-from base import BaseStrategy, Signals, StrategyConfig
+from base import Signals, StrategyConfig
 
 def create_bollinger_mean_reversion_signals(df: pd.DataFrame, **params) -> Signals:
     """
@@ -168,31 +167,20 @@ def create_bollinger_mean_reversion_signals(df: pd.DataFrame, **params) -> Signa
     )
 
 
-class VectorBTStrategy(BaseStrategy):
-    """VectorBT Bollinger Bands Mean Reversion Strategy - Class-based interface."""
+def generate_vectorbt_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
+    """Generate VectorBT signals from multi-timeframe data."""
+    if not tf_data:
+        empty_series = pd.Series(False, index=pd.Index([]))
+        return Signals(empty_series, empty_series, empty_series, empty_series)
 
-    def __init__(self, config: StrategyConfig):
-        super().__init__(config)
-        self.signal_params = config.parameters.copy()
+    # Use primary timeframe
+    primary_tf = params.get('primary_timeframe', list(tf_data.keys())[0])
+    if primary_tf not in tf_data:
+        primary_tf = list(tf_data.keys())[0]
 
-    def get_required_timeframes(self) -> List[str]:
-        return self.get_parameter('required_timeframes', ['1h'])
+    primary_df = tf_data[primary_tf]
+    return create_bollinger_mean_reversion_signals(primary_df, **params)
 
-    def get_required_columns(self) -> List[str]:
-        return ['open', 'high', 'low', 'close']
 
-    def generate_signals(self, tf_data: Dict[str, pd.DataFrame]) -> Signals:
-        """Generate VectorBT signals using functional approach."""
-        if not tf_data:
-            empty_series = pd.Series(False, index=pd.Index([]))
-            return Signals(empty_series, empty_series, empty_series, empty_series)
-
-        # Use primary timeframe
-        primary_tf = self.signal_params.get('primary_timeframe', list(tf_data.keys())[0])
-        if primary_tf not in tf_data:
-            primary_tf = list(tf_data.keys())[0]
-
-        primary_df = tf_data[primary_tf]
-        return create_bollinger_mean_reversion_signals(primary_df, **self.signal_params)
 
 

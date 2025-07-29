@@ -16,97 +16,89 @@ import vectorbt as vbt
 # Set VectorBT global settings for consistent plotting
 vbt.settings.set_theme("dark")
 # Note: VectorBT plotting settings are handled per-plot call
-
+vbt.settings['plotting']['layout']["template"] = "plotly_dark"
 def create_performance_plots(portfolios: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
     """Create performance plots for multiple portfolios."""
-    visualizer = TradingVisualizer()
-    return visualizer.plot_comprehensive_analysis(portfolios, strategy_name)
+    return plot_comprehensive_analysis(portfolios, strategy_name)
 
-class TradingVisualizer:
-    """Streamlined visualization leveraging VectorBT's built-in plotting."""
+def plot_comprehensive_analysis(portfolios, strategy_name: str = "Trading Strategy",
+                              mc_results: Optional[Dict[str, Any]] = None,
+                              wf_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Plot everything: portfolios, Monte Carlo, and walk-forward analysis."""
 
-    def __init__(self):
-        self.dark_colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3']
+    try:
+        # Handle single portfolio or dict of portfolios
+        if portfolios is None:
+            print("⚠️ No portfolios provided")
+            return {"success": False, "error": "No portfolios provided"}
 
-    def plot_comprehensive_analysis(self, portfolios, strategy_name: str = "Trading Strategy",
-                                  mc_results: Optional[Dict[str, Any]] = None,
-                                  wf_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Plot everything: portfolios, Monte Carlo, and walk-forward analysis."""
+        # Convert single portfolio to dict format
+        if not isinstance(portfolios, dict):
+            portfolios = {"Portfolio": portfolios}
 
+        # Check for empty portfolios dict
+        if not portfolios:
+            print("⚠️ Empty portfolios dictionary provided")
+            return {"success": False, "error": "Empty portfolios dictionary"}
+
+        # Plot portfolios
+        _plot_portfolios(portfolios, strategy_name)
+
+        # Plot analysis results if available
+        if mc_results and 'error' not in mc_results:
+            print("🎲 Plotting Monte Carlo analysis...")
+            _plot_monte_carlo(mc_results)
+
+        if wf_results and 'error' not in wf_results:
+            print("🚶 Plotting walk-forward analysis...")
+            _plot_walkforward(wf_results)
+
+        print("✅ Comprehensive analysis completed.")
+        return {"success": True}
+
+    except Exception as e:
+        print(f"⚠️ Comprehensive analysis failed: {e}")
+        return {"success": False, "error": str(e)}
+
+def _plot_portfolios(portfolios: Dict[str, Any], strategy_name: str) -> None:
+    """Plot individual portfolios and comparison using VectorBT native functionality."""
+    print("📊 Creating portfolio visualizations...")
+
+    # Plot each portfolio individually with VectorBT native methods
+    for name, portfolio in portfolios.items():
         try:
-            # Handle single portfolio or dict of portfolios
-            if portfolios is None:
-                print("⚠️ No portfolios provided")
-                return {"success": False, "error": "No portfolios provided"}
+            print(f"📈 Creating VectorBT native plot for {name}...")
 
-            # Convert single portfolio to dict format
-            if not isinstance(portfolios, dict):
-                portfolios = {"Portfolio": portfolios}
+            # Use VectorBT's comprehensive plotting with all subplots
+            fig = portfolio.plot(
+                template='plotly_dark',
+                height=None,
+                width=None
+            )
+            fig.update_layout(
+                title=f"📊 {strategy_name} Strategy - {name} Performance"
+            )
+            fig.show()
 
-            # Check for empty portfolios dict
-            if not portfolios:
-                print("⚠️ Empty portfolios dictionary provided")
-                return {"success": False, "error": "Empty portfolios dictionary"}
-
-            # Plot portfolios
-            self._plot_portfolios(portfolios, strategy_name)
-
-            # Plot analysis results if available
-            if mc_results and 'error' not in mc_results:
-                print("🎲 Plotting Monte Carlo analysis...")
-                self._plot_monte_carlo(mc_results)
-
-            if wf_results and 'error' not in wf_results:
-                print("🚶 Plotting walk-forward analysis...")
-                self._plot_walkforward(wf_results)
-
-            print("✅ Comprehensive analysis completed.")
-            return {"success": True}
+            # VectorBT native rolling Sharpe using built-in methods
+            _plot_vectorbt_rolling_metrics(portfolio, f"{strategy_name} - {name}")
 
         except Exception as e:
-            print(f"⚠️ Comprehensive analysis failed: {e}")
-            return {"success": False, "error": str(e)}
+            print(f"⚠️ Failed to plot {name}: {e}")
+            continue
 
-    def _plot_portfolios(self, portfolios: Dict[str, Any], strategy_name: str) -> None:
-        """Plot individual portfolios and comparison using VectorBT native functionality."""
-        print("📊 Creating portfolio visualizations...")
+    # Create VectorBT native comparison plot if multiple portfolios
+    if len(portfolios) > 1:
+        _create_vectorbt_comparison(portfolios, strategy_name)
 
-        # Plot each portfolio individually with VectorBT native methods
-        for name, portfolio in portfolios.items():
-            try:
-                print(f"📈 Creating VectorBT native plot for {name}...")
+def _create_vectorbt_comparison(portfolios: Dict[str, Any], strategy_name: str):
+    """Create VectorBT native comparison plot for multiple portfolios."""
+    try:
+        print("📊 Creating VectorBT native portfolio comparison...")
 
-                # Use VectorBT's comprehensive plotting with all subplots
-                fig = portfolio.plot(
-                    template='plotly_dark',
-                    height=None,
-                    width=None
-                )
-                fig.update_layout(
-                    title=f"📊 {strategy_name} Strategy - {name} Performance"
-                )
-                fig.show()
+        portfolio_list = list(portfolios.values())
 
-                # VectorBT native rolling Sharpe using built-in methods
-                self._plot_vectorbt_rolling_metrics(portfolio, f"{strategy_name} - {name}")
-
-            except Exception as e:
-                print(f"⚠️ Failed to plot {name}: {e}")
-                continue
-
-        # Create VectorBT native comparison plot if multiple portfolios
-        if len(portfolios) > 1:
-            self._create_vectorbt_comparison(portfolios, strategy_name)
-
-    def _create_vectorbt_comparison(self, portfolios: Dict[str, Any], strategy_name: str):
-        """Create VectorBT native comparison plot for multiple portfolios."""
-        try:
-            print("📊 Creating VectorBT native portfolio comparison...")
-
-            portfolio_list = list(portfolios.values())
-
-
-            if len(portfolio_list) > 1:
+        if len(portfolio_list) > 1:
                 # Use VectorBT's native multi-portfolio value plotting
                 fig = go.Figure()
 
@@ -129,14 +121,14 @@ class TradingVisualizer:
                 fig.show()
 
                 # VectorBT native metrics comparison using stats()
-                self._plot_vectorbt_metrics_comparison(portfolios, strategy_name)
+                _plot_vectorbt_metrics_comparison(portfolios, strategy_name)
 
-        except Exception as e:
-            print(f"⚠️ VectorBT comparison plot failed: {e}")
+    except Exception as e:
+        print(f"⚠️ VectorBT comparison plot failed: {e}")
 
 
 
-    def _plot_monte_carlo(self, mc_results: Dict[str, Any]) -> Dict[str, Any]:
+def _plot_monte_carlo(mc_results: Dict[str, Any]) -> Dict[str, Any]:
         """Plot Monte Carlo results with enhanced visualizations."""
         try:
             if 'analysis' not in mc_results:
@@ -167,7 +159,6 @@ class TradingVisualizer:
                 x=returns_data,
                 nbinsx=30,
                 name='Returns',
-                marker_color=self.dark_colors[0],
                 opacity=0.7
             ))
 
@@ -194,7 +185,6 @@ class TradingVisualizer:
                 x=sharpes_data,
                 nbinsx=30,
                 name='Sharpe',
-                marker_color=self.dark_colors[1],
                 opacity=0.7
             ))
 
@@ -234,7 +224,6 @@ class TradingVisualizer:
                             y=series.values,
                             mode='lines',
                             name=series.name,
-                            line={"width": 1, "color": self.dark_colors[i % len(self.dark_colors)]},
                             opacity=0.6
                         ))
 
@@ -257,7 +246,6 @@ class TradingVisualizer:
                         x=sharpe_stds,
                         nbinsx=20,
                         name='Sharpe Volatility',
-                        marker_color=self.dark_colors[3],
                         opacity=0.7
                     ))
                     fig_stability.update_layout(
@@ -275,7 +263,7 @@ class TradingVisualizer:
             print(f"⚠️ Monte Carlo plot failed: {e}")
             return {"success": False, "error": str(e)}
 
-    def _plot_walkforward(self, wf_results: Dict[str, Any]) -> Dict[str, Any]:
+def _plot_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
         """Plot enhanced walk-forward analysis results with multiple asset support."""
         try:
             if 'windows' not in wf_results:
@@ -289,14 +277,14 @@ class TradingVisualizer:
             has_multiple_assets = any('asset_results' in w for w in windows)
 
             if has_multiple_assets:
-                return self._plot_multi_asset_walkforward(wf_results)
-            return self._plot_single_asset_walkforward(wf_results)
+                return _plot_multi_asset_walkforward(wf_results)
+            return _plot_single_asset_walkforward(wf_results)
 
         except Exception as e:
             print(f"⚠️ Walk-forward plot failed: {e}")
             return {"success": False, "error": str(e)}
 
-    def _plot_single_asset_walkforward(self, wf_results: Dict[str, Any]) -> Dict[str, Any]:
+def _plot_single_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
         """Plot walk-forward analysis for single asset."""
         windows = wf_results['windows']
 
@@ -338,14 +326,12 @@ class TradingVisualizer:
             go.Scatter(
                 x=window_nums, y=train_returns,
                 mode='lines+markers', name='Train Returns',
-                line={"color": self.dark_colors[0], "width": 3}
             ), row=1, col=1
         )
         fig.add_trace(
             go.Scatter(
                 x=window_nums, y=test_returns,
                 mode='lines+markers', name='Test Returns',
-                line={"color": self.dark_colors[1], "width": 3}
             ), row=1, col=1
         )
 
@@ -354,7 +340,6 @@ class TradingVisualizer:
             go.Scatter(
                 x=window_nums, y=train_sharpes,
                 mode='lines+markers', name='Train Sharpe',
-                line={"color": self.dark_colors[0], "width": 3},
                 showlegend=False
             ), row=1, col=2
         )
@@ -362,7 +347,6 @@ class TradingVisualizer:
             go.Scatter(
                 x=window_nums, y=test_sharpes,
                 mode='lines+markers', name='Test Sharpe',
-                line={"color": self.dark_colors[1], "width": 3},
                 showlegend=False
             ), row=1, col=2
         )
@@ -372,7 +356,6 @@ class TradingVisualizer:
             go.Scatter(
                 x=train_returns, y=test_returns,
                 mode='markers', name='Returns Correlation',
-                marker={"color": self.dark_colors[2], "size": 10},
                 showlegend=False
             ), row=2, col=1
         )
@@ -381,14 +364,13 @@ class TradingVisualizer:
             go.Scatter(
                 x=train_sharpes, y=test_sharpes,
                 mode='markers', name='Sharpe Correlation',
-                marker={"color": self.dark_colors[3], "size": 10},
                 showlegend=False
             ), row=2, col=2
         )
 
         # Add diagonal reference lines
-        self._add_diagonal_lines(fig, train_returns, test_returns, 2, 1)
-        self._add_diagonal_lines(fig, train_sharpes, test_sharpes, 2, 2)
+        _add_diagonal_lines(fig, train_returns, test_returns, 2, 1)
+        _add_diagonal_lines(fig, train_sharpes, test_sharpes, 2, 2)
 
         # Add rolling Sharpe plots if available
         if (rolling_sharpe_train or rolling_sharpe_test) and rows > 2:
@@ -397,7 +379,6 @@ class TradingVisualizer:
                     go.Scatter(
                         y=rolling_sharpe_train,
                         mode='lines', name='Rolling Sharpe (Train)',
-                        line={"color": self.dark_colors[0], "width": 2}
                     ), row=3, col=1
                 )
             if rolling_sharpe_test:
@@ -405,7 +386,6 @@ class TradingVisualizer:
                     go.Scatter(
                         y=rolling_sharpe_test,
                         mode='lines', name='Rolling Sharpe (Test)',
-                        line={"color": self.dark_colors[1], "width": 2}
                     ), row=3, col=1
                 )
 
@@ -415,7 +395,6 @@ class TradingVisualizer:
                 go.Scatter(
                     x=window_nums, y=degradation,
                     mode='lines+markers', name='Performance Degradation',
-                    line={"color": self.dark_colors[4], "width": 2}
                 ), row=3, col=2
             )
             fig.add_hline(y=0, line_dash="dash", line_color="gray", row=3, col=2)
@@ -431,7 +410,7 @@ class TradingVisualizer:
 
         return {"success": True}
 
-    def _plot_multi_asset_walkforward(self, wf_results: Dict[str, Any]) -> Dict[str, Any]:
+def _plot_multi_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
         """Plot walk-forward analysis for multiple assets."""
         windows = wf_results['windows']
 
@@ -440,7 +419,7 @@ class TradingVisualizer:
         asset_names = list(first_window.get('asset_results', {}).keys())
 
         if not asset_names:
-            return self._plot_single_asset_walkforward(wf_results)
+            return _plot_single_asset_walkforward(wf_results)
 
         # Create comparison plots for multiple assets
         fig = make_subplots(
@@ -457,7 +436,6 @@ class TradingVisualizer:
 
         # Plot each asset's performance
         for i, asset in enumerate(asset_names):
-            color = self.dark_colors[i % len(self.dark_colors)]
 
             # Extract asset-specific data
             train_returns = []
@@ -510,7 +488,6 @@ class TradingVisualizer:
             go.Bar(
                 x=list(assets_sorted), y=list(returns_sorted),
                 name='Final Test Returns',
-                marker_color=self.dark_colors[:len(assets_sorted)]
             ), row=2, col=2
         )
 
@@ -525,7 +502,7 @@ class TradingVisualizer:
 
         return {"success": True}
 
-    def _add_diagonal_lines(self, fig, x_data, y_data, row, col):
+def _add_diagonal_lines(fig, x_data, y_data, row, col):
         """Add diagonal reference lines for correlation plots."""
         if x_data and y_data:
             all_values = list(x_data) + list(y_data)
@@ -539,7 +516,7 @@ class TradingVisualizer:
                 ), row=row, col=col
             )
 
-    def _plot_vectorbt_rolling_metrics(self, portfolio, title: str) -> None:
+def _plot_vectorbt_rolling_metrics(portfolio, title: str) -> None:
         """Plot rolling metrics using VectorBT native functionality."""
         try:
             print(f"📈 Creating VectorBT rolling metrics for {title}...")
@@ -558,7 +535,6 @@ class TradingVisualizer:
                     y=rolling_sharpe.values,
                     mode='lines',
                     name='Rolling Sharpe (60D)',
-                    line={"color": self.dark_colors[0], "width": 2}
                 ))
 
                 fig.update_layout(
@@ -582,7 +558,7 @@ class TradingVisualizer:
         except Exception as e:
             print(f"⚠️ VectorBT rolling metrics plot failed: {e}")
 
-    def _plot_vectorbt_metrics_comparison(self, portfolios: Dict[str, Any], strategy_name: str) -> None:
+def _plot_vectorbt_metrics_comparison(portfolios: Dict[str, Any], strategy_name: str) -> None:
         """Plot metrics comparison using VectorBT native functionality."""
         try:
             print("📊 Creating VectorBT metrics comparison...")
@@ -615,5 +591,3 @@ class TradingVisualizer:
 
         except Exception as e:
             print(f"⚠️ VectorBT metrics comparison failed: {e}")
-
-    # Performance summary table functionality removed

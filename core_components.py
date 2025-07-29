@@ -6,8 +6,7 @@ Contains base classes and core functionality shared across modules.
 
 import os
 import warnings
-from typing import Dict, Optional, Union, List
-from dataclasses import dataclass
+from typing import Dict, List
 
 import pandas as pd
 import vectorbt as vbt
@@ -108,18 +107,18 @@ def _infer_frequency(index: pd.DatetimeIndex) -> str:
                     diff_seconds = most_common_diff.iloc[0].total_seconds()
                     if diff_seconds == 3600:  # 1 hour
                         return '1H'
-                    elif diff_seconds == 86400:  # 1 day
+                    if diff_seconds == 86400:  # 1 day
                         return '1D'
-                    elif diff_seconds == 900:  # 15 minutes
+                    if diff_seconds == 900:  # 15 minutes
                         return '15T'
-                    elif diff_seconds == 300:  # 5 minutes
+                    if diff_seconds == 300:  # 5 minutes
                         return '5T'
-                    elif diff_seconds == 60:  # 1 minute
+                    if diff_seconds == 60:  # 1 minute
                         return '1T'
         
         # Default fallback
         return '1H'
-    except:
+    except Exception:
         return '1H'
 
 
@@ -134,24 +133,27 @@ def _align_data_and_signals(df: pd.DataFrame, signals: Signals) -> tuple:
     # Convert index to datetime if needed
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index)
-    if not isinstance(signals.entries.index, pd.DatetimeIndex):
+    if signals.entries is not None and not isinstance(signals.entries.index, pd.DatetimeIndex):
         signals.entries.index = pd.to_datetime(signals.entries.index)
     
     # Find common index
-    common_index = df.index.intersection(signals.entries.index)
-    if len(common_index) == 0:
-        raise ValueError("No common index between data and signals - need at least one overlapping timestamp")
+    if signals.entries is not None:
+        common_index = df.index.intersection(signals.entries.index)
+        if len(common_index) == 0:
+            raise ValueError("No common index between data and signals - need at least one overlapping timestamp")
 
-    # Align data
-    df_aligned = df.loc[common_index]
-    signals_aligned = Signals(
-        entries=signals.entries.loc[common_index],
-        exits=signals.exits.loc[common_index],
-        short_entries=signals.short_entries.loc[common_index],
-        short_exits=signals.short_exits.loc[common_index]
-    )
-    
-    return df_aligned, signals_aligned
+        # Align data
+        df_aligned = df.loc[common_index]
+        signals_aligned = Signals(
+            entries=signals.entries.loc[common_index] if signals.entries is not None else None,
+            exits=signals.exits.loc[common_index] if signals.exits is not None else None,
+            short_entries=signals.short_entries.loc[common_index] if signals.short_entries is not None else None,
+            short_exits=signals.short_exits.loc[common_index] if signals.short_exits is not None else None
+        )
+        
+        return df_aligned, signals_aligned
+    else:
+        raise ValueError("Signals entries cannot be None")
 
 def run_backtest_multi_symbol_timeframe(data: Dict[str, Dict[str, pd.DataFrame]],
                                        signals: Dict[str, Dict[str, Signals]],

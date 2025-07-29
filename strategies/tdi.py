@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-TDI (Traders Dynamic Index) Strategy - Functional Implementation
+TDI (Traders Dynamic Index) Strategy - Pure Functional Implementation
 Simplified TDI strategy with RSI-based signals.
 """
 
 from typing import Dict, List
 import pandas as pd
 import pandas_ta as ta
-from base import BaseStrategy, Signals, StrategyConfig
+from base import Signals, StrategyConfig
 
 
 def create_tdi_signals(df: pd.DataFrame, **params) -> Signals:
@@ -69,29 +69,26 @@ def create_tdi_signals(df: pd.DataFrame, **params) -> Signals:
     return Signals(entries=entries, exits=exits, short_entries=short_entries, short_exits=short_exits)
 
 
-class TDIStrategy(BaseStrategy):
-    """TDI Strategy - Functional wrapper for backward compatibility."""
+def get_tdi_required_timeframes(params: Dict) -> List[str]:
+    """Get required timeframes for TDI strategy."""
+    return params.get('required_timeframes', ['15m', '30m', '1h', '4h', '1D'])
+
+
+def get_tdi_required_columns() -> List[str]:
+    """Get required columns for TDI strategy."""
+    return ['open', 'high', 'low', 'close']
+
+
+def generate_tdi_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
+    """Generate TDI signals from multi-timeframe data."""
+    if not tf_data:
+        empty_series = pd.Series(False, index=pd.Index([]))
+        return Signals(empty_series, empty_series, empty_series, empty_series)
     
-    def __init__(self, config: StrategyConfig):
-        super().__init__(config)
-        self.signal_params = config.parameters.copy()
+    # Use primary timeframe
+    primary_tf = params.get('primary_timeframe', list(tf_data.keys())[0])
+    if primary_tf not in tf_data:
+        primary_tf = list(tf_data.keys())[0]
     
-    def get_required_timeframes(self) -> List[str]:
-        return self.get_parameter('required_timeframes', ['15m', '30m', '1h', '4h', '1D'])
-    
-    def get_required_columns(self) -> List[str]:
-        return ['open', 'high', 'low', 'close']
-    
-    def generate_signals(self, tf_data: Dict[str, pd.DataFrame]) -> Signals:
-        """Generate TDI signals using functional approach."""
-        if not tf_data:
-            empty_series = pd.Series(False, index=pd.Index([]))
-            return Signals(empty_series, empty_series, empty_series, empty_series)
-        
-        # Use primary timeframe
-        primary_tf = self.signal_params.get('primary_timeframe', list(tf_data.keys())[0])
-        if primary_tf not in tf_data:
-            primary_tf = list(tf_data.keys())[0]
-        
-        primary_df = tf_data[primary_tf]
-        return create_tdi_signals(primary_df, **self.signal_params)
+    primary_df = tf_data[primary_tf]
+    return create_tdi_signals(primary_df, **params)

@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Union
 from datetime import datetime, timedelta
 import pandas as pd
 import yaml
-from base import BaseStrategy
 
 # Simple mappings
 TIMEFRAMES = {
@@ -106,7 +105,7 @@ def load_strategy_config(strategy_name: str) -> Dict:
     
     return config
 
-def load_data_for_strategy(strategy: BaseStrategy, time_range: Optional[str] = None, 
+def load_data_for_strategy(strategy, time_range: Optional[str] = None, 
                           end_date: Optional[Union[str, datetime]] = None) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Load all necessary data for a given strategy with optional time range control.
     

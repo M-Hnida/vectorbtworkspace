@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-ORB (Opening Range Breakout) Strategy - Functional Implementation
+ORB (Opening Range Breakout) Strategy - Pure Functional Implementation
 Multi-timeframe opening range breakout strategy.
 """
 
 from typing import Dict, List
 import pandas as pd
 import pandas_ta as ta
-from base import BaseStrategy, Signals, StrategyConfig
+from base import Signals, StrategyConfig
 
 
 def create_orb_signals(df: pd.DataFrame, **params) -> Signals:
@@ -67,29 +67,29 @@ def create_orb_signals(df: pd.DataFrame, **params) -> Signals:
     return Signals(entries=entries, exits=exits, short_entries=short_entries, short_exits=short_exits)
 
 
-class ORBStrategy(BaseStrategy):
-    """ORB Strategy - Functional wrapper for backward compatibility."""
+def get_orb_required_timeframes(params: Dict) -> List[str]:
+    """Get required timeframes for ORB strategy."""
+    return params.get('required_timeframes', ['15m', '1h'])
+
+
+def get_orb_required_columns() -> List[str]:
+    """Get required columns for ORB strategy."""
+    return ['open', 'high', 'low', 'close']
+
+
+def generate_orb_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
+    """Generate ORB signals from multi-timeframe data."""
+    if not tf_data:
+        empty_series = pd.Series(False, index=pd.Index([]))
+        return Signals(empty_series, empty_series, empty_series, empty_series)
     
-    def __init__(self, config: StrategyConfig):
-        super().__init__(config)
-        self.signal_params = config.parameters.copy()
+    # Use primary timeframe
+    primary_tf = params.get('primary_timeframe', list(tf_data.keys())[0])
+    if primary_tf not in tf_data:
+        primary_tf = list(tf_data.keys())[0]
     
-    def get_required_timeframes(self) -> List[str]:
-        return self.get_parameter('required_timeframes', ['15m', '1h'])
-    
-    def get_required_columns(self) -> List[str]:
-        return ['open', 'high', 'low', 'close']
-    
-    def generate_signals(self, tf_data: Dict[str, pd.DataFrame]) -> Signals:
-        """Generate ORB signals using functional approach."""
-        if not tf_data:
-            empty_series = pd.Series(False, index=pd.Index([]))
-            return Signals(empty_series, empty_series, empty_series, empty_series)
-        
-        # Use primary timeframe
-        primary_tf = self.signal_params.get('primary_timeframe', list(tf_data.keys())[0])
-        if primary_tf not in tf_data:
-            primary_tf = list(tf_data.keys())[0]
-        
-        primary_df = tf_data[primary_tf]
-        return create_orb_signals(primary_df, **self.signal_params)
+    primary_df = tf_data[primary_tf]
+    return create_orb_signals(primary_df, **params)
+
+
+# Pure functional approach - no classes needed
