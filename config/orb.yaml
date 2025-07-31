@@ -17,9 +17,6 @@ parameters:
     - "15m"  # Entry timeframe
     - "1h"   # Range definition timeframe
 
-  # Training/Testing split ratio
-  split_ratio: 0.7 # 70% for training, 30% for testing
-
 # ------------------------------------------------------------
 # Optimization Parameter Ranges
 # ------------------------------------------------------------

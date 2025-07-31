@@ -229,7 +229,7 @@ def _add_mc_histogram(fig: go.Figure, returns_data: list, statistics: dict) -> N
     # Debug: Print data characteristics
     print(f"   Debug - Returns data: {len(returns_data)} simulations")
     print(f"   Debug - Returns range: [{min(returns_data):.3f}%, {max(returns_data):.3f}%]")
-    print(f"   Debug - Returns sample: {returns_data[:5]}")
+    print(f"   Debug - Returns sample: {[f'{x:.3f}%' for x in returns_data[:5]]}")
 
     fig.add_trace(go.Histogram(
         x=returns_data, nbinsx=50, name='Random Returns',
@@ -266,9 +266,9 @@ def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
     returns = [sim['total_return'] for sim in simulations]
     
     # Debug: Print data characteristics
-    print(f"   Debug - Param1 values: {param1_values}")
-    print(f"   Debug - Param2 values: {param2_values}")
-    print(f"   Debug - Returns: {returns}")
+    print(f"   Debug - Param1 values: {len(param1_values)} values, range: [{min(param1_values) if param1_values else 'N/A'}, {max(param1_values) if param1_values else 'N/A'}]")
+    print(f"   Debug - Param2 values: {len(param2_values)} values, range: [{min(param2_values) if param2_values else 'N/A'}, {max(param2_values) if param2_values else 'N/A'}]")
+    print(f"   Debug - Returns: {len(returns)} values, range: [{min(returns):.3f}%, {max(returns):.3f}%]" if returns else "   Debug - Returns: No data")
 
     # Check if we have valid parameter data
     if all(p == 0 or pd.isna(p) for p in param1_values) or all(p == 0 or pd.isna(p) for p in param2_values):
@@ -332,7 +332,7 @@ def _add_mc_percentiles(fig: go.Figure, returns_data: list, statistics: dict) ->
     percentile_values = [np.percentile(returns_data, p) for p in percentiles]
 
     # Debug: Print percentile data
-    print(f"   Debug - Percentiles: {list(zip(percentiles, percentile_values))}")
+    print(f"   Debug - Percentiles: {len(percentiles)} calculated")
     print(f"   Debug - Percentile range: [{min(percentile_values):.3f}%, {max(percentile_values):.3f}%]")
 
     fig.add_trace(go.Scatter(
@@ -641,20 +641,32 @@ def _add_diagonal_lines(fig, x_data, y_data, row, col):
 def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
     """Create default vs optimized comparison plot."""
     try:
+        import plotly.graph_objects as go
+        
         # Extract stats from both backtests
-        def extract_stats(backtest_key):
-            if backtest_key not in results:
-                return None
-            for _, timeframes in results[backtest_key].items():
-                for _, result in timeframes.items():
-                    if 'portfolio' in result:
-                        return result['portfolio'].stats()
-            return None
-
-        default_stats = extract_stats('default_backtest')
-        optimized_stats = extract_stats('full_backtest')
-
-        if not default_stats or not optimized_stats:
+        default_stats = None
+        optimized_stats = None
+        
+        # Extract stats from both backtests - portfolios are stored directly now
+        if 'default_backtest' in results:
+            for symbol, timeframes in results['default_backtest'].items():
+                for tf, portfolio in timeframes.items():
+                    if hasattr(portfolio, 'stats'):
+                        default_stats = portfolio.stats()
+                        break
+                if default_stats is not None:
+                    break
+        
+        if 'full_backtest' in results:
+            for symbol, timeframes in results['full_backtest'].items():
+                for tf, portfolio in timeframes.items():
+                    if hasattr(portfolio, 'stats'):
+                        optimized_stats = portfolio.stats()
+                        break
+                if optimized_stats is not None:
+                    break
+        
+        if default_stats is None or optimized_stats is None:
             return {"success": False, "reason": "missing_stats"}
 
         # Create comparison chart
@@ -675,6 +687,46 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
         ]
 
         fig = go.Figure()
+        
+        # Add bars for comparison
+        fig.add_trace(go.Bar(
+            name='Default Parameters',
+            x=metrics_names,
+            y=default_values,
+            marker_color='lightblue',
+            opacity=0.7
+        ))
+        
+        fig.add_trace(go.Bar(
+            name='Optimized Parameters',
+            x=metrics_names,
+            y=optimized_values,
+            marker_color='red',
+            opacity=0.7
+        ))
+
+        fig.update_layout(
+            title=f'{strategy_name} Strategy: Default vs Optimized Parameters',
+            xaxis_title='Metrics',
+            yaxis_title='Values',
+            barmode='group',
+            template='plotly_dark',
+            height=600
+        )
+        fig.show()
+
+        # Print improvement summary
+        print(f"\n📈 Optimization Impact Summary:")
+        print(f"   Return: {default_values[0]:.2f}% → {optimized_values[0]:.2f}% ({optimized_values[0] - default_values[0]:+.2f}%)")
+        print(f"   Sharpe: {default_values[1]:.3f} → {optimized_values[1]:.3f} ({optimized_values[1] - default_values[1]:+.3f})")
+        print(f"   Max DD: {default_values[2]:.2f}% → {optimized_values[2]:.2f}% ({optimized_values[2] - default_values[2]:+.2f}%)")
+        print(f"   Win Rate: {default_values[3]:.1f}% → {optimized_values[3]:.1f}% ({optimized_values[3] - default_values[3]:+.1f}%)")
+        
+        return {"success": True}
+        
+    except Exception as e:
+        print(f"⚠️ Comparison plot failed: {e}")
+        return {"success": False, "error": str(e)}
         fig.add_trace(go.Bar(name='Default Parameters', x=metrics_names, y=default_values, 
                            marker_color='lightblue', opacity=0.7))
         fig.add_trace(go.Bar(name='Optimized Parameters', x=metrics_names, y=optimized_values, 
@@ -700,3 +752,50 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
         print(f"⚠️ Comparison plot failed: {e}")
         return {"success": False, "error": str(e)}
 
+
+def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
+    """Create enhanced visualizations with default vs optimized comparison."""
+    try:
+        # Collect portfolios for plotting
+        portfolios = {}
+        default_portfolios = {}
+        
+        # Get optimized results - portfolios are stored directly now
+        if 'full_backtest' in results:
+            for symbol, timeframes in results['full_backtest'].items():
+                for timeframe, portfolio in timeframes.items():
+                    if hasattr(portfolio, 'stats'):
+                        portfolios[f"{symbol}_{timeframe}_optimized"] = portfolio
+        
+        # Get default results (if available) - portfolios are stored directly now
+        if 'default_backtest' in results:
+            for symbol, timeframes in results['default_backtest'].items():
+                for timeframe, portfolio in timeframes.items():
+                    if hasattr(portfolio, 'stats'):
+                        default_portfolios[f"{symbol}_{timeframe}_default"] = portfolio
+                        portfolios[f"{symbol}_{timeframe}_default"] = portfolio
+        
+        if portfolios:
+            # Enhanced plotting with comparison data
+            plot_results = plot_comprehensive_analysis(
+                portfolios,  # Use positional argument
+                strategy_name,
+                results.get('monte_carlo', {}),
+                results.get('walkforward', {})
+            )
+            
+            # Create default vs optimized comparison plot if both exist
+            if default_portfolios and len(portfolios) > len(default_portfolios):
+                print("📊 Creating Default vs Optimized comparison...")
+                comparison_results = create_comparison_plot(results, strategy_name)
+                if plot_results is None:
+                    plot_results = {}
+                plot_results['comparison'] = comparison_results
+            
+            return plot_results or {}
+        
+        return {}
+        
+    except Exception as e:
+        print(f"⚠️ Visualization failed: {e}")
+        return {"error": str(e)}

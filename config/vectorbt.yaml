@@ -32,8 +32,6 @@ parameters:
   required_timeframes:
     - "1h"
 
-  # Training/Testing split ratio
-  split_ratio: 0.7
 
 optimization_grid:
   bbands_period: [15, 20, 25]
