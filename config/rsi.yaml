@@ -1,0 +1,17 @@
+parameters:
+  rsi_period: 14
+  oversold_level: 30
+  overbought_level: 70
+  primary_timeframe: "1h"
+
+optimization_grid:
+  rsi_period: [10, 14, 21]
+  oversold_level: [20, 25, 30]
+  overbought_level: [70, 75, 80]
+
+data_requirements:
+  required_timeframes: ["1h"]
+  required_columns: ["open", "high", "low", "close"]
+
+csv_path:
+  - "data/EURUSD_1H_2009-2025.csv"

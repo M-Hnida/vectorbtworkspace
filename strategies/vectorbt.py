@@ -7,7 +7,7 @@ Clean implementation focused on signal generation and configuration.
 import pandas as pd
 import pandas_ta as ta
 from typing import Dict, List
-from base import Signals, StrategyConfig
+from base import Signals
 
 def create_bollinger_mean_reversion_signals(df: pd.DataFrame, **params) -> Signals:
     """
@@ -61,7 +61,7 @@ def create_bollinger_mean_reversion_signals(df: pd.DataFrame, **params) -> Signa
 
     # Clean up NaN values
     data.dropna(inplace=True)
-    data.reset_index(drop=True, inplace=True)  # Reset index after dropping NaNs
+    # Keep the original DatetimeIndex - don't reset it
 
     # Define column names for readability
     bbl_col = f'BBL_{bbands_period}_{bbands_std}'
@@ -170,7 +170,8 @@ def create_bollinger_mean_reversion_signals(df: pd.DataFrame, **params) -> Signa
 def generate_vectorbt_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
     """Generate VectorBT signals from multi-timeframe data."""
     if not tf_data:
-        empty_series = pd.Series(False, index=pd.Index([]))
+        empty_index = pd.DatetimeIndex([])
+        empty_series = pd.Series(False, index=empty_index)
         return Signals(empty_series, empty_series, empty_series, empty_series)
 
     # Use primary timeframe
@@ -179,7 +180,22 @@ def generate_vectorbt_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) ->
         primary_tf = list(tf_data.keys())[0]
 
     primary_df = tf_data[primary_tf]
+    
+    # Ensure the DataFrame has a DatetimeIndex
+    if not isinstance(primary_df.index, pd.DatetimeIndex):
+        primary_df.index = pd.to_datetime(primary_df.index)
+    
     return create_bollinger_mean_reversion_signals(primary_df, **params)
+
+
+def get_vectorbt_required_timeframes(params: Dict) -> List[str]:
+    """Get required timeframes for VectorBT strategy."""
+    return params.get('required_timeframes', ['1h'])
+
+
+def get_vectorbt_required_columns() -> List[str]:
+    """Get required columns for VectorBT strategy."""
+    return ['open', 'high', 'low', 'close']
 
 
 

@@ -7,63 +7,45 @@ Simple momentum-based trading signals.
 from typing import Dict, List
 import pandas as pd
 import pandas_ta as ta
-from base import Signals, StrategyConfig
+from base import Signals
 
 
 def create_momentum_signals(df: pd.DataFrame, **params) -> Signals:
-    """Create momentum trading signals.
-
-    Args:
-        df: OHLC DataFrame
-        **params: Strategy parameters
-            - momentum_period: Period for momentum calculation (default: 10)
-            - signal_smoothing: Smoothing period for signals (default: 3)
-            - volatility_period: Period for volatility calculation (default: 20)
-            - ma_length: Moving average length for trend filter (default: 50)
-            - atr_period: ATR period for volatility (default: 14)
-            - atr_multiple: ATR multiple for stops (default: 2.0)
-            - volatility_threshold: Minimum momentum threshold (default: 0.01)
-
-    Returns:
-        Signals object with entries and exits
-    """
-    # Parameters with defaults
+    """Create momentum trading signals."""
+    # Parameters
     momentum_period = params.get("momentum_period", 10)
     signal_smoothing = params.get("signal_smoothing", 3)
     volatility_period = params.get("volatility_period", 20)
     ma_length = params.get("ma_length", 50)
-    atr_period = params.get("atr_period", 14)
-    atr_multiple = params.get("atr_multiple", 2.0)
     volatility_threshold = params.get("volatility_momentum_threshold", 0.01)
 
     # Calculate indicators
-    momentum = df["close"].pct_change(momentum_period, fill_method=None)
-    volatility = df["close"].rolling(volatility_period).std()
-    ma = df["close"].rolling(ma_length).mean()
-    atr = ta.atr(df["high"], df["low"], df["close"], length=atr_period)
+    momentum = df["close"].pct_change(momentum_period).fillna(0)
+    volatility = df["close"].rolling(volatility_period).std().fillna(0)
+    ma = df["close"].rolling(ma_length).mean().fillna(df["close"])
 
     # Generate signals
-    trend_up = df["close"] > ma
-    high_momentum = momentum > volatility_threshold
-    sufficient_volatility = volatility > volatility.rolling(50).mean()
+    trend_up = (df["close"] > ma).fillna(False)
+    high_momentum = (momentum > volatility_threshold).fillna(False)
+    sufficient_volatility = (volatility > volatility.rolling(50).mean().fillna(volatility.mean())).fillna(False)
 
     # Entry: uptrend + momentum + volatility
     entries = trend_up & high_momentum & sufficient_volatility
-
-    # Exit: momentum reversal
-    exits = momentum < -volatility_threshold
+    exits = (momentum < -volatility_threshold).fillna(False)
 
     # Smooth signals if requested
     if signal_smoothing > 1:
-        entries = entries.rolling(signal_smoothing).sum() >= signal_smoothing
-        exits = exits.rolling(signal_smoothing).sum() >= 1
+        entries = (entries.rolling(signal_smoothing).sum() >= signal_smoothing).fillna(False)
+        exits = (exits.rolling(signal_smoothing).sum() >= 1).fillna(False)
 
-    # Create empty short signals for strategies that don't use them
+    # Ensure no NaN values in final signals
+    entries = entries.fillna(False)
+    exits = exits.fillna(False)
+
+    # Empty short signals
     empty_short = pd.Series(False, index=entries.index)
 
-    return Signals(
-        entries=entries, exits=exits, short_entries=empty_short, short_exits=empty_short
-    )
+    return Signals(entries=entries, exits=exits, short_entries=empty_short, short_exits=empty_short)
 
 
 def get_momentum_required_timeframes(params: Dict) -> List[str]:
@@ -76,12 +58,13 @@ def get_momentum_required_columns() -> List[str]:
     return ["open", "high", "low", "close"]
 
 
-def generate_momentum_signals(
+def generate_signals(
     tf_data: Dict[str, pd.DataFrame], params: Dict
 ) -> Signals:
     """Generate momentum signals from multi-timeframe data."""
     if not tf_data:
-        empty_series = pd.Series(False, index=pd.Index([]))
+        empty_index = pd.DatetimeIndex([])
+        empty_series = pd.Series(False, index=empty_index)
         return Signals(empty_series, empty_series, empty_series, empty_series)
 
     # Use primary timeframe
@@ -90,6 +73,11 @@ def generate_momentum_signals(
         primary_tf = list(tf_data.keys())[0]
 
     primary_df = tf_data[primary_tf]
+    
+    # Ensure the DataFrame has a DatetimeIndex
+    if not isinstance(primary_df.index, pd.DatetimeIndex):
+        primary_df.index = pd.to_datetime(primary_df.index)
+    
     return create_momentum_signals(primary_df, **params)
 
 

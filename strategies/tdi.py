@@ -7,25 +7,12 @@ Simplified TDI strategy with RSI-based signals.
 from typing import Dict, List
 import pandas as pd
 import pandas_ta as ta
-from base import Signals, StrategyConfig
+from base import Signals
 
 
 def create_tdi_signals(df: pd.DataFrame, **params) -> Signals:
-    """Create TDI (Traders Dynamic Index) signals.
-    
-    Args:
-        df: OHLC DataFrame
-        **params: Strategy parameters
-            - rsi_period: RSI calculation period (default: 21)
-            - tdi_fast_period: Fast TDI line period (default: 2)
-            - tdi_slow_period: Slow TDI line period (default: 7)
-            - tdi_middle_period: Middle TDI line period (default: 34)
-            - oversold_level: Oversold level for RSI (default: 30)
-            - overbought_level: Overbought level for RSI (default: 70)
-    
-    Returns:
-        Signals object with entries and exits
-    """
+    """Create TDI (Traders Dynamic Index) signals."""
+    # Parameters
     rsi_period = params.get('rsi_period', 21)
     tdi_fast_period = params.get('tdi_fast_period', 2)
     tdi_slow_period = params.get('tdi_slow_period', 7)
@@ -35,38 +22,42 @@ def create_tdi_signals(df: pd.DataFrame, **params) -> Signals:
     
     # Calculate RSI
     rsi = ta.rsi(df['close'], length=rsi_period)
+    if rsi is None or not hasattr(rsi, 'rolling'):
+        rsi = pd.Series(50.0, index=df.index)
     
-    # Calculate TDI components (moving averages of RSI)
-    tdi_fast = rsi.rolling(tdi_fast_period).mean()
-    tdi_slow = rsi.rolling(tdi_slow_period).mean()
-    tdi_middle = rsi.rolling(tdi_middle_period).mean()
+    # Ensure rsi is a pandas Series
+    if not isinstance(rsi, pd.Series):
+        rsi = pd.Series(rsi, index=df.index)
     
-    # TDI signals
-    # Entry: fast line crosses above slow line and both above middle
-    fast_above_slow = tdi_fast > tdi_slow
+    # Calculate TDI components
+    tdi_fast = rsi.rolling(window=tdi_fast_period, min_periods=1).mean()
+    tdi_slow = rsi.rolling(window=tdi_slow_period, min_periods=1).mean()
+    tdi_middle = rsi.rolling(window=tdi_middle_period, min_periods=1).mean()
+    
+    # Signal conditions
     above_middle = (tdi_fast > tdi_middle) & (tdi_slow > tdi_middle)
     below_middle = (tdi_fast < tdi_middle) & (tdi_slow < tdi_middle)
     
-    # Crossover detection
+    # Crossovers
     fast_cross_up = (tdi_fast > tdi_slow) & (tdi_fast.shift(1) <= tdi_slow.shift(1))
     fast_cross_down = (tdi_fast < tdi_slow) & (tdi_fast.shift(1) >= tdi_slow.shift(1))
     
-    # RSI level filters
+    # RSI filters
     rsi_oversold = rsi < oversold_level
     rsi_overbought = rsi > overbought_level
     
-    # Entry and exit signals
+    # Generate signals
     long_entries = fast_cross_up & above_middle & ~rsi_overbought
     short_entries = fast_cross_down & below_middle & ~rsi_oversold
-    
     long_exits = fast_cross_down | (tdi_fast < tdi_middle) | rsi_overbought
     short_exits = fast_cross_up | (tdi_fast > tdi_middle) | rsi_oversold
     
-    # Combine for simple long-only strategy
-    entries = long_entries
-    exits = long_exits
-    
-    return Signals(entries=entries, exits=exits, short_entries=short_entries, short_exits=short_exits)
+    return Signals(
+        entries=long_entries.fillna(False),
+        exits=long_exits.fillna(False),
+        short_entries=short_entries.fillna(False),
+        short_exits=short_exits.fillna(False)
+    )
 
 
 def get_tdi_required_timeframes(params: Dict) -> List[str]:
@@ -82,7 +73,8 @@ def get_tdi_required_columns() -> List[str]:
 def generate_tdi_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
     """Generate TDI signals from multi-timeframe data."""
     if not tf_data:
-        empty_series = pd.Series(False, index=pd.Index([]))
+        empty_index = pd.DatetimeIndex([])
+        empty_series = pd.Series(False, index=empty_index)
         return Signals(empty_series, empty_series, empty_series, empty_series)
     
     # Use primary timeframe
@@ -91,4 +83,9 @@ def generate_tdi_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Sign
         primary_tf = list(tf_data.keys())[0]
     
     primary_df = tf_data[primary_tf]
+    
+    # Ensure the DataFrame has a DatetimeIndex
+    if not isinstance(primary_df.index, pd.DatetimeIndex):
+        primary_df.index = pd.to_datetime(primary_df.index)
+    
     return create_tdi_signals(primary_df, **params)

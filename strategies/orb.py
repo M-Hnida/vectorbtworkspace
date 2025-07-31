@@ -6,35 +6,17 @@ Multi-timeframe opening range breakout strategy.
 
 from typing import Dict, List
 import pandas as pd
-import pandas_ta as ta
-from base import Signals, StrategyConfig
+from base import Signals
 
 
 def create_orb_signals(df: pd.DataFrame, **params) -> Signals:
-    """Create Opening Range Breakout signals.
-    
-    Args:
-        df: OHLC DataFrame
-        **params: Strategy parameters
-            - orb_period: Number of periods for opening range (default: 1)
-            - breakout_threshold: Minimum range size as % of price (default: 0.005)
-            - atr_period: ATR period for volatility (default: 14)
-            - atr_multiple: ATR multiple for stops (default: 2.0)
-    
-    Returns:
-        Signals object with entries and exits
-    """
+    """Create Opening Range Breakout signals."""
     orb_period = params.get('orb_period', 1)
     breakout_threshold = params.get('breakout_threshold', 0.005)
-    atr_period = params.get('atr_period', 14)
-    atr_multiple = params.get('atr_multiple', 2.0)
-    
-    # Calculate ATR for volatility
-    atr = ta.atr(df['high'], df['low'], df['close'], length=atr_period)
     
     # Calculate opening range (first N periods of each day)
     df_copy = df.copy()
-    df_copy['date'] = df_copy.index.date
+    df_copy['date'] = pd.to_datetime(df_copy.index).date
     
     # Group by date and calculate daily opening ranges
     daily_ranges = df_copy.groupby('date').apply(
@@ -56,15 +38,11 @@ def create_orb_signals(df: pd.DataFrame, **params) -> Signals:
     long_entries = (df['close'] > df_copy['range_high']) & valid_range
     short_entries = (df['close'] < df_copy['range_low']) & valid_range
     
-    # Exit signals: return to range or stop loss
+    # Exit signals: return to range
     long_exits = df['close'] < df_copy['range_low']
     short_exits = df['close'] > df_copy['range_high']
     
-    # Combine entries and exits
-    entries = long_entries
-    exits = long_exits
-    
-    return Signals(entries=entries, exits=exits, short_entries=short_entries, short_exits=short_exits)
+    return Signals(entries=long_entries, exits=long_exits, short_entries=short_entries, short_exits=short_exits)
 
 
 def get_orb_required_timeframes(params: Dict) -> List[str]:
@@ -77,10 +55,11 @@ def get_orb_required_columns() -> List[str]:
     return ['open', 'high', 'low', 'close']
 
 
-def generate_orb_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
+def generate_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
     """Generate ORB signals from multi-timeframe data."""
     if not tf_data:
-        empty_series = pd.Series(False, index=pd.Index([]))
+        empty_index = pd.DatetimeIndex([])
+        empty_series = pd.Series(False, index=empty_index)
         return Signals(empty_series, empty_series, empty_series, empty_series)
     
     # Use primary timeframe
@@ -89,6 +68,11 @@ def generate_orb_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Sign
         primary_tf = list(tf_data.keys())[0]
     
     primary_df = tf_data[primary_tf]
+    
+    # Ensure the DataFrame has a DatetimeIndex
+    if not isinstance(primary_df.index, pd.DatetimeIndex):
+        primary_df.index = pd.to_datetime(primary_df.index)
+    
     return create_orb_signals(primary_df, **params)
 
 

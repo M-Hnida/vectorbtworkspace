@@ -243,13 +243,21 @@ def _load_symbol_data(file_paths: List[str], required_timeframes: List[str],
     if not all_dataframes:
         raise ValueError(f"No data loaded for any required timeframes: {required_timeframes}")
     
-    # Harmonize time ranges across all loaded dataframes
-    harmonized_data = _harmonize_time_ranges(all_dataframes, time_range, end_date)
-    
-    # Filter to only return required timeframes
-    for tf in required_timeframes:
-        if tf in harmonized_data:
-            data[tf] = harmonized_data[tf]
+    # Only harmonize if we have multiple timeframes or time_range is specified
+    if len(all_dataframes) > 1 or time_range is not None:
+        print("📅 Harmonizing time ranges across timeframes...")
+        harmonized_data = _harmonize_time_ranges(all_dataframes, time_range, end_date)
+        
+        # Filter to only return required timeframes
+        for tf in required_timeframes:
+            if tf in harmonized_data:
+                data[tf] = harmonized_data[tf]
+    else:
+        # Single timeframe, no harmonization needed
+        print("📅 Single timeframe detected, skipping harmonization")
+        for tf in required_timeframes:
+            if tf in all_dataframes:
+                data[tf] = all_dataframes[tf]
     
     return data
 
