@@ -64,7 +64,7 @@ def run_single_backtest(symbol: str, timeframe: str, timeframes: Dict[str, pd.Da
         portfolio = run_backtest(primary_data, signals)
         
         # Log results
-        total_return = portfolio.stats()['Total Return [%]']
+        total_return = portfolio.stats()['Total Return [%]'] #type:ignore
         tf_label = f" (Multi-TF)" if is_multi_tf else ""
         print(f"✅ {symbol} {timeframe}{tf_label}: {total_return:.2f}%")
         
@@ -148,12 +148,16 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
     
     # Create a simple strategy context for optimizer
     class OptimizerStrategyContext:
+        """Strategy context for optimization operations."""
+        
         def __init__(self):
+            """Initialize optimizer strategy context."""
             self.name = strategy_name
             self.parameters = strategy_config.parameters.copy()
             self.signal_func = get_strategy_signal_function(strategy_name)
         
         def get_required_timeframes(self):
+            """Get required timeframes for the strategy."""
             return get_required_timeframes(strategy_name, self.parameters)
     
     strategy_context = OptimizerStrategyContext()
@@ -178,12 +182,16 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
     from walk_forward import run_walkforward_analysis
     
     class OptimizedStrategyContext:
+        """Strategy context for optimized parameters."""
+        
         def __init__(self):
+            """Initialize optimized strategy context."""
             self.name = strategy_name
             self.parameters = optimized_params
             self.signal_func = get_strategy_signal_function(strategy_name)
         
         def get_required_timeframes(self):
+            """Get required timeframes for the strategy."""
             return get_required_timeframes(strategy_name, self.parameters)
     
     optimized_context = OptimizedStrategyContext()
@@ -223,12 +231,19 @@ def run_strategy_analysis(strategy_name: str, fast_mode: bool = False,
         
         # Create simple strategy context for data loading
         class StrategyContext:
+            """Simple strategy context for data loading operations."""
             name = strategy_name
+            
             def get_required_timeframes(self):
+                """Get required timeframes for the strategy."""
                 return get_required_timeframes(strategy_name, strategy_config.parameters)
+            
             def get_required_columns(self):
+                """Get required columns for the strategy."""
                 return get_required_columns(strategy_name)
+            
             def get_parameter(self, key, default=None):
+                """Get strategy parameter value."""
                 return strategy_config.parameters.get(key, default)
         
         strategy_context = StrategyContext()
@@ -281,7 +296,7 @@ def get_user_strategy_choice() -> Optional[str]:
         return None
 
     print("\n📊 Available Strategies:")
-    for i, strategy in enumerate(available_strategies, 1):
+    for i ,strategy  in enumerate(available_strategies, 1):
         print(f"{i}. {strategy}")
 
     try:

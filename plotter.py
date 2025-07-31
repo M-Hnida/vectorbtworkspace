@@ -32,7 +32,7 @@ def plot_comprehensive_analysis(portfolios, strategy_name: str = "Trading Strate
     """Plot everything: portfolios, Monte Carlo, and walk-forward analysis."""
     try:
         if not portfolios:
-            print("⚠️ No portfolios provided")
+            print("Warning: No portfolios provided")
             return {"success": False, "error": "No portfolios provided"}
 
         if not isinstance(portfolios, dict):
@@ -41,23 +41,23 @@ def plot_comprehensive_analysis(portfolios, strategy_name: str = "Trading Strate
         _plot_portfolios(portfolios, strategy_name)
 
         if mc_results and 'error' not in mc_results:
-            print("🎲 Plotting Monte Carlo analysis...")
+            print("Plotting Monte Carlo analysis...")
             _plot_monte_carlo(mc_results)
 
         if wf_results and 'error' not in wf_results:
-            print("🚶 Plotting walk-forward analysis...")
+            print("Plotting walk-forward analysis...")
             _plot_walkforward(wf_results)
 
-        print("✅ Comprehensive analysis completed.")
+        print("Comprehensive analysis completed.")
         return {"success": True}
 
     except Exception as e:
-        print(f"⚠️ Comprehensive analysis failed: {e}")
+        print(f"Comprehensive analysis failed: {e}")
         return {"success": False, "error": str(e)}
 
 def _plot_portfolios(portfolios: Dict[str, Any], strategy_name: str) -> None:
     """Plot individual portfolios and comparison using VectorBT native functionality."""
-    print("📊 Creating portfolio visualizations...")
+    print("Creating portfolio visualizations...")
 
     # Plot each portfolio individually
     for name, portfolio in portfolios.items():
@@ -67,7 +67,7 @@ def _plot_portfolios(portfolios: Dict[str, Any], strategy_name: str) -> None:
         try:
             _plot_single_portfolio(portfolio, name, strategy_name)
         except Exception as e:
-            print(f"⚠️ Failed to plot {name}: {e}")
+            print(f"Failed to plot {name}: {e}")
             continue
 
     # Create comparison plot if multiple portfolios
@@ -78,54 +78,55 @@ def _plot_portfolios(portfolios: Dict[str, Any], strategy_name: str) -> None:
 def _validate_portfolio(portfolio: Any, name: str) -> bool:
     """Validate portfolio before plotting."""
     if portfolio is None:
-        print(f"⚠️ Skipping {name}: portfolio is None")
+        print(f"Skipping {name}: portfolio is None")
         return False
         
     try:
         stats = portfolio.stats()
         if stats is None or len(stats) == 0 or not stats.get('Total Trades', 0):
-            print(f"⚠️ Skipping {name}: no trades")
+            print(f"Skipping {name}: no trades")
             return False
 
         value_series = portfolio.value()
         if value_series is None or len(value_series) == 0 or value_series.isna().all():
-            print(f"⚠️ Skipping {name}: no valid value data")
+            print(f"Skipping {name}: no valid value data")
             return False
 
-        if portfolio.orders is None:
-            print(f"⚠️ Portfolio orders is None for {name}")
-            return False
+        # Make orders validation tolerant - feature-detect via hasattr
+        if hasattr(portfolio, 'orders') and portfolio.orders is None:
+            print(f"Warning: Portfolio orders is None for {name}, but proceeding with valid stats and value")
+            # Don't return False - allow plotting if stats and value are valid
 
         return True
         
     except Exception as e:
-        print(f"⚠️ Portfolio validation failed for {name}: {e}")
+        print(f"Portfolio validation failed for {name}: {e}")
         return False
 
 
 def _plot_single_portfolio(portfolio: Any, name: str, strategy_name: str) -> None:
     """Plot a single portfolio."""
-    print(f"📈 Creating VectorBT plot for {name}...")
-    print(f"✅ Portfolio validation passed for {name}")
+    print(f"Creating VectorBT plot for {name}...")
+    print(f"Portfolio validation passed for {name}")
     
     try:
         fig = portfolio.plot(template='plotly_dark')
         fig.update_layout(
-            title=f"📊 {strategy_name} Strategy - {name} Performance",
+            title=f"{strategy_name} Strategy - {name} Performance",
             height=600,
             width=1200
         )
         fig.show()
         
     except Exception as plot_error:
-        print(f"⚠️ VectorBT plot failed for {name}: {plot_error}")
+        print(f"VectorBT plot failed for {name}: {plot_error}")
         print(f"   Portfolio type: {type(portfolio)}")
         print(f"   Portfolio stats available: {hasattr(portfolio, 'stats')}")
         
 def _create_vectorbt_comparison(portfolios: Dict[str, Any], strategy_name: str):
     """Create VectorBT native comparison plot for multiple portfolios."""
     try:
-        print("📊 Creating portfolio comparison...")
+        print("Creating portfolio comparison...")
         if len(portfolios) <= 1:
             return
 
@@ -150,10 +151,10 @@ def _create_vectorbt_comparison(portfolios: Dict[str, Any], strategy_name: str):
                     mode='lines', name=name, line={"width": 3}
                 ))
             except Exception as e:
-                print(f"⚠️ Failed to add {name} to comparison: {e}")
+                print(f"Failed to add {name} to comparison: {e}")
 
         fig.update_layout(
-            title=f"📊 {strategy_name} Strategy - Portfolio Comparison (Normalized)",
+            title=f"{strategy_name} Strategy - Portfolio Comparison (Normalized)",
             yaxis_title="Normalized Value (Start = 100)", xaxis_title="Date",
             template='plotly_dark', height=600, width=1200
         )
@@ -161,7 +162,7 @@ def _create_vectorbt_comparison(portfolios: Dict[str, Any], strategy_name: str):
     
 
     except Exception as e:
-        print(f"⚠️ VectorBT comparison plot failed: {e}")
+        print(f"VectorBT comparison plot failed: {e}")
 
 def _plot_monte_carlo(mc_results: Dict[str, Any]) -> Dict[str, Any]:
     """Plot Monte Carlo results with parameter sensitivity analysis."""
@@ -181,8 +182,8 @@ def _plot_monte_carlo(mc_results: Dict[str, Any]) -> Dict[str, Any]:
             rows=2, cols=2,
             subplot_titles=[
                 'Monte Carlo Return Distribution',
-                'Parameter Sensitivity Analysis', 
-                'Percentile Analysis',
+                'Parameter Sensitivity Analysis',
+                'Monte Carlo Simulation Paths',
                 'Performance vs Random'
             ],
             specs=[[{"secondary_y": False}, {"secondary_y": False}],
@@ -217,7 +218,7 @@ def _plot_monte_carlo(mc_results: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": True}
 
     except Exception as e:
-        print(f"⚠️ Monte Carlo plot failed: {e}")
+        print(f"Monte Carlo plot failed: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -226,20 +227,23 @@ def _add_mc_histogram(fig: go.Figure, returns_data: list, statistics: dict) -> N
     if not returns_data:
         return
 
-    # Debug: Print data characteristics
-    print(f"   Debug - Returns data: {len(returns_data)} simulations")
-    print(f"   Debug - Returns range: [{min(returns_data):.3f}%, {max(returns_data):.3f}%]")
-    print(f"   Debug - Returns sample: {[f'{x:.3f}%' for x in returns_data[:5]]}")
-
+    # Calculate optimal number of bins based on data
+    n_bins = min(50, max(10, int(np.sqrt(len(returns_data)))))
+    
     fig.add_trace(go.Histogram(
-        x=returns_data, nbinsx=50, name='Random Returns',
-        opacity=0.7, marker_color='lightblue', showlegend=True
+        x=returns_data,
+        nbinsx=n_bins,
+        name='Random Returns',
+        opacity=0.7,
+        marker_color='lightblue',
+        showlegend=True
+        # histnorm defaults to '' which shows raw counts
     ), row=1, col=1)
 
     actual_return = statistics.get('actual_return')
     if actual_return is not None:
-        # Get the maximum frequency for proper scaling
-        hist_counts, _ = np.histogram(returns_data, bins=50)
+        # Get the maximum frequency using the same binning as the histogram
+        hist_counts, bin_edges = np.histogram(returns_data, bins=n_bins)
         max_count = max(hist_counts) if len(hist_counts) > 0 else 1
 
         fig.add_shape(
@@ -252,124 +256,208 @@ def _add_mc_histogram(fig: go.Figure, returns_data: list, statistics: dict) -> N
             showarrow=True, arrowcolor="red", xref="x1", yref="y1"
         )
 
-    # REMOVED: Confusing 90% confidence box overlay
-
 
 def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
     """Add parameter sensitivity analysis subplot."""
     if not simulations:
+        print("Warning: No simulations provided for parameter sensitivity analysis")
         return
 
-    # Extract parameter values and returns
-    param1_values = [sim.get('param1', 0) for sim in simulations]
-    param2_values = [sim.get('param2', 0) for sim in simulations]
-    returns = [sim['total_return'] for sim in simulations]
+    # Extract parameter values and returns with better handling
+    param1_values = []
+    param2_values = []
+    returns = []
+    
+    # Try different parameter key names that might exist
+    possible_param_keys = [
+        ['param1', 'param2'], ['parameter1', 'parameter2'],
+        ['p1', 'p2'], ['params', None], ['parameters', None]
+    ]
+    
+    for sim in simulations:
+        # Try to find parameter values in simulation data
+        p1, p2 = None, None
+        
+        for key_pair in possible_param_keys:
+            if key_pair[0] in sim:
+                if isinstance(sim[key_pair[0]], (list, tuple)) and len(sim[key_pair[0]]) >= 2:
+                    p1, p2 = sim[key_pair[0]][0], sim[key_pair[0]][1]
+                    break
+                elif key_pair[1] and key_pair[1] in sim:
+                    p1, p2 = sim[key_pair[0]], sim[key_pair[1]]
+                    break
+                elif isinstance(sim[key_pair[0]], (int, float)):
+                    p1 = sim[key_pair[0]]
+                    # Try to find second parameter
+                    if 'param2' in sim:
+                        p2 = sim['param2']
+                    elif len(simulations) > 1:
+                        # Use simulation index as second parameter if no param2
+                        p2 = simulations.index(sim)
+        
+        # If still no parameters found, use defaults
+        if p1 is None:
+            p1 = sim.get('param1', sim.get('parameter1', sim.get('p1', 0)))
+        if p2 is None:
+            p2 = sim.get('param2', sim.get('parameter2', sim.get('p2', 0)))
+            
+        param1_values.append(p1)
+        param2_values.append(p2)
+        returns.append(sim['total_return'])
     
     # Debug: Print data characteristics
     print(f"   Debug - Param1 values: {len(param1_values)} values, range: [{min(param1_values) if param1_values else 'N/A'}, {max(param1_values) if param1_values else 'N/A'}]")
     print(f"   Debug - Param2 values: {len(param2_values)} values, range: [{min(param2_values) if param2_values else 'N/A'}, {max(param2_values) if param2_values else 'N/A'}]")
     print(f"   Debug - Returns: {len(returns)} values, range: [{min(returns):.3f}%, {max(returns):.3f}%]" if returns else "   Debug - Returns: No data")
 
-    # Check if we have valid parameter data
-    if all(p == 0 or pd.isna(p) for p in param1_values) or all(p == 0 or pd.isna(p) for p in param2_values):
-        fig.add_trace(go.Scatter(
-            x=[0, 1], y=[0, 1], mode='text',
-            text=["No valid parameter data available", "for sensitivity analysis"],
-            textposition="middle center",
-            showlegend=False
-        ), row=1, col=2)
+    # Check if we have meaningful parameter variation
+    param1_unique = len(set(param1_values)) > 1
+    param2_unique = len(set(param2_values)) > 1
+    
+    if not param1_unique and not param2_unique:
+        print("Warning: No parameter variation detected - all simulations used same parameters, skipping parameter sensitivity subplot")
         return
 
-    # Validate that param1 and param2 have non-zero and non-NaN values
-    valid_simulations = [
-        (param1, param2, ret) 
-        for param1, param2, ret in zip(param1_values, param2_values, returns) 
-        if param1 != 0 and not pd.isna(param1) and param2 != 0 and not pd.isna(param2)
-    ]
+    # Filter out invalid values (NaN, None, etc.)
+    valid_simulations = []
+    for p1, p2, ret in zip(param1_values, param2_values, returns):
+        if (p1 is not None and not pd.isna(p1) and
+            p2 is not None and not pd.isna(p2) and
+            ret is not None and not pd.isna(ret)):
+            valid_simulations.append((p1, p2, ret))
 
     if not valid_simulations:
-        fig.add_trace(go.Scatter(
-            x=[0, 1], y=[0, 1], mode='text',
-            text=["No valid parameter data available", "for sensitivity analysis"],
-            textposition="middle center",
-            showlegend=False
-        ), row=1, col=2)
+        print("Warning: No valid parameter combinations found in simulation data, skipping parameter sensitivity subplot")
         return
 
     param1_values, param2_values, returns = zip(*valid_simulations)
 
-    # Create scatter plot with color-coded returns
+    # Create scatter plot with improved visualization
     fig.add_trace(go.Scatter(
         x=param1_values, y=param2_values,
         mode='markers',
         marker=dict(
-            size=8,
+            size=10,
             color=returns,
-            colorscale='Viridis',
-            colorbar=dict(title="Return (%)", x=0.95, y=0.5),
-            showscale=True
+            colorscale='RdYlGn',  # Red-Yellow-Green scale (red=bad, green=good)
+            colorbar=dict(
+                title="Return (%)", 
+                x=0.52,  # Position colorbar to the right of parameter sensitivity plot
+                y=0.85,  # Position at top
+                len=0.3,  # Make it shorter
+                thickness=15,
+                xpad=10  # Add padding from the plot
+            ),
+            showscale=True,
+            line=dict(width=1, color='white')  # Add white border to markers
         ),
-        text=[f"Return: {r:.2f}%" for r in returns],
-        hovertemplate="<b>Param 1:</b> %{x}<br>" +
-                      "<b>Param 2:</b> %{y}<br>" +
+        text=[f"P1: {p1}<br>P2: {p2}<br>Return: {r:.2f}%" for p1, p2, r in zip(param1_values, param2_values, returns)],
+        hovertemplate="<b>Parameter 1:</b> %{x}<br>" +
+                      "<b>Parameter 2:</b> %{y}<br>" +
                       "<b>Return:</b> %{marker.color:.2f}%<br>" +
                       "<extra></extra>",
         showlegend=False,
         name='Parameter Combinations'
     ), row=1, col=2)
 
-    # Update axes labels
-    fig.update_xaxes(title_text="Parameter 1", row=1, col=2)
-    fig.update_yaxes(title_text="Parameter 2", row=1, col=2)
+    # Add best performance marker
+    best_idx = returns.index(max(returns))
+    fig.add_trace(go.Scatter(
+        x=[param1_values[best_idx]], y=[param2_values[best_idx]],
+        mode='markers',
+        marker=dict(size=15, color='gold', symbol='star', line=dict(width=2, color='black')),
+        name='Best Performance',
+        showlegend=True,
+        hovertemplate=f"<b>Best Combination</b><br>P1: {param1_values[best_idx]}<br>P2: {param2_values[best_idx]}<br>Return: {returns[best_idx]:.2f}%<extra></extra>"
+    ), row=1, col=2)
+
+    # Update axes labels with better formatting and positioning
+    fig.update_xaxes(title_text="Parameter 1", row=1, col=2, showgrid=True, gridcolor='rgba(255,255,255,0.1)')
+    fig.update_yaxes(
+        title_text="Parameter 2", 
+        row=1, col=2, 
+        showgrid=True, 
+        gridcolor='rgba(255,255,255,0.1)',
+        title_standoff=25  # Add more space between y-axis title and plot to avoid colorbar overlap
+    )
 
 
 def _add_mc_percentiles(fig: go.Figure, returns_data: list, statistics: dict) -> None:
-    """Add clear percentile analysis - shows how strategy ranks vs random."""
+    """Add Monte Carlo simulation paths visualization."""
     if not returns_data:
         return
 
-    percentiles = [5, 10, 25, 50, 75, 90, 95]
-    percentile_values = [np.percentile(returns_data, p) for p in percentiles]
+    # Get simulation data from statistics if available
+    simulations = statistics.get('simulations', [])
+    
+    if simulations and len(simulations) > 0:
+        # Plot individual simulation paths (sample a subset to avoid clutter)
+        max_paths = min(50, len(simulations))  # Show max 50 paths
+        sample_indices = np.linspace(0, len(simulations)-1, max_paths, dtype=int)
+        
+        for i, idx in enumerate(sample_indices):
+            sim = simulations[idx]
+            if 'equity_curve' in sim and sim['equity_curve'] is not None:
+                equity_curve = sim['equity_curve']
+                # Normalize to percentage change from start
+                if len(equity_curve) > 0:
+                    normalized_curve = [(val / equity_curve[0] - 1) * 100 for val in equity_curve]
+                    
+                    fig.add_trace(go.Scatter(
+                        y=normalized_curve,
+                        mode='lines',
+                        line={'color': 'rgba(100,149,237,0.3)', 'width': 1},
+                        name='MC Simulation' if i == 0 else None,
+                        showlegend=(i == 0),
+                        hovertemplate="Path %{fullData.name}<br>Return: %{y:.2f}%<extra></extra>"
+                    ), row=2, col=1)
+        
+        # Add strategy performance if available
+        actual_return = statistics.get('actual_return')
+        if actual_return is not None:
+            # Add strategy line (assuming we have the actual equity curve)
+            strategy_equity = statistics.get('strategy_equity_curve', [])
+            if strategy_equity:
+                strategy_normalized = [(val / strategy_equity[0] - 1) * 100 for val in strategy_equity]
+                fig.add_trace(go.Scatter(
+                    y=strategy_normalized,
+                    mode='lines',
+                    line={'color': 'red', 'width': 3},
+                    name='Your Strategy',
+                    showlegend=True
+                ), row=2, col=1)
+            else:
+                # If no equity curve, just show final return as horizontal line
+                fig.add_shape(
+                    type="line", x0=0, x1=len(normalized_curve) if 'normalized_curve' in locals() else 100,
+                    y0=actual_return, y1=actual_return,
+                    line={"color": "red", "width": 3},
+                    xref="x3", yref="y3"
+                )
+                fig.add_annotation(
+                    x=50, y=actual_return, text=f"Strategy: {actual_return:.2f}%",
+                    showarrow=True, arrowcolor="red", xref="x3", yref="y3"
+                )
+    else:
+        # Fallback to percentile analysis if no simulation paths available
+        percentiles = [5, 10, 25, 50, 75, 90, 95]
+        percentile_values = [np.percentile(returns_data, p) for p in percentiles]
 
-    # Debug: Print percentile data
-    print(f"   Debug - Percentiles: {len(percentiles)} calculated")
-    print(f"   Debug - Percentile range: [{min(percentile_values):.3f}%, {max(percentile_values):.3f}%]")
-
-    fig.add_trace(go.Scatter(
-        x=percentiles, y=percentile_values, mode='lines+markers',
-        name='Random Performance Curve', line={'color': 'cyan', 'width': 3},
-        marker={'size': 8}, showlegend=True
-    ), row=2, col=1)
-
-    # Add strategy performance point and line
-    actual_return = statistics.get('actual_return')
-    if actual_return is not None:
-        # Calculate the actual percentile rank of the strategy
-        percentile_rank = statistics.get('percentile_rank', 50)
-        beats_percent = percentile_rank  # percentile_rank IS the % of strategies beaten
-
-        # Add strategy point on the curve
         fig.add_trace(go.Scatter(
-            x=[percentile_rank], y=[actual_return], mode='markers',
-            name='Your Strategy', marker={'color': 'red', 'size': 12, 'symbol': 'diamond'},
-            showlegend=True
+            x=percentiles, y=percentile_values, mode='lines+markers',
+            name='Random Performance Curve', line={'color': 'cyan', 'width': 3},
+            marker={'size': 8}, showlegend=True
         ), row=2, col=1)
 
-        # Add horizontal reference line
-        fig.add_shape(
-            type="line", x0=0, x1=100, y0=actual_return, y1=actual_return,
-            line={"dash": "dash", "color": "rgba(255,0,0,0.5)", "width": 2},
-            xref="x3", yref="y3"
-        )
-
-        # Clear explanation of what percentile means
-        explanation = f'Your Strategy: {actual_return:.2f}%<br>Beats {beats_percent:.1f}% of random strategies'
-        fig.add_annotation(
-            x=percentile_rank + 5, y=actual_return, text=explanation,
-            showarrow=True, arrowcolor="red", xref="x3", yref="y3",
-            bgcolor="red", bordercolor="white", borderwidth=1,
-            font=dict(color="white", size=10)
-        )
+        # Add strategy performance point
+        actual_return = statistics.get('actual_return')
+        if actual_return is not None:
+            percentile_rank = statistics.get('percentile_rank', 50)
+            fig.add_trace(go.Scatter(
+                x=[percentile_rank], y=[actual_return], mode='markers',
+                name='Your Strategy', marker={'color': 'red', 'size': 12, 'symbol': 'diamond'},
+                showlegend=True
+            ), row=2, col=1)
 
 
 def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
@@ -389,12 +477,18 @@ def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
     # Add bars with better formatting
     for i, (category, val, color) in enumerate(zip(categories, values, colors)):
         showlegend = i < 2  # Only show legend for main items
+        
+        # Choose text position based on bar value to prevent overflow
+        text_position = 'outside' if val < 0 else 'inside'
+        text_color = 'white' if text_position == 'inside' else color
+        
         fig.add_trace(go.Bar(
             x=[category], y=[val], marker_color=color,
             name=category.replace('\n', ' ') if showlegend else None,
             showlegend=showlegend,
-            text=f'{val:.2f}%',
-            textposition='outside'
+            text=f'{val:.1f}%',
+            textposition=text_position,
+            textfont=dict(color=text_color, size=10)
         ), row=2, col=2)
 
     # Add zero reference line
@@ -404,11 +498,16 @@ def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
         xref="x4", yref="y4"
     )
 
-    # Add performance interpretation
+    # Add performance interpretation with better positioning
     performance_text = "Outperforming" if actual_return > mean_random else "Underperforming"
+    
+    # Position annotation above the highest positive value or below if all negative
+    y_pos = max(values) + abs(max(values)) * 0.1 if max(values) > 0 else min(values) - abs(min(values)) * 0.1
+    
     fig.add_annotation(
-        x=1.5, y=max(values) * 0.8, text=f"Strategy is {performance_text} vs Random",
-        showarrow=False, xref="x4", yref="y4", font=dict(size=12, color="white")
+        x=1.5, y=y_pos, text=f"Strategy is {performance_text} vs Random",
+        showarrow=False, xref="x4", yref="y4", font=dict(size=11, color="white"),
+        bgcolor="rgba(0,0,0,0.5)", bordercolor="white", borderwidth=1
     )
 
 
@@ -417,7 +516,7 @@ def _update_mc_axes(fig: go.Figure) -> None:
     axis_updates = [
         (1, 1, "Return (%)", "Frequency"),
         (1, 2, "Parameter 1", "Parameter 2"),
-        (2, 1, "Percentile", "Return (%)"),
+        (2, 1, "Time Steps", "Return (%)"),
         (2, 2, "Category", "Return (%)")
     ]
     
@@ -426,13 +525,16 @@ def _update_mc_axes(fig: go.Figure) -> None:
         fig.update_yaxes(title_text=y_title, row=row, col=col)
     
     # Set specific axis ranges for better visualization
-    fig.update_yaxes(range=[0, 100], row=1, col=2)  # Percentile rank 0-100%
+    fig.update_yaxes(range=[0, 100], row=1, col=2)  # Parameter sensitivity
     fig.update_xaxes(tickangle=45, row=2, col=2)  # Rotate category labels
+    
+    # Auto-scale bar chart to prevent overflow - remove fixed range
+    fig.update_yaxes(autorange=True, row=2, col=2)  # Auto-scale for proper fit
 
 
 def _print_mc_summary(statistics: dict) -> None:
     """Print Monte Carlo parameter sensitivity summary."""
-    print("\n📊 Monte Carlo Parameter Sensitivity Analysis:")
+    print("\nMonte Carlo Parameter Sensitivity Analysis:")
     
     actual_return = statistics.get('actual_return')
     mean_random = statistics.get('mean_return', 0)
@@ -468,7 +570,7 @@ def _plot_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
         return _plot_single_asset_walkforward(wf_results)
 
     except Exception as e:
-        print(f"⚠️ Walk-forward plot failed: {e}")
+        print(f"Walk-forward plot failed: {e}")
         return {"success": False, "error": str(e)}
 
 def _plot_single_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -528,7 +630,7 @@ def _plot_single_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]
                      line={"dash": "dash", "color": "gray"}, xref="x6", yref="y6")
 
     fig.update_layout(
-        title_text="🚶 Walk-Forward Analysis - VectorBT Enhanced Performance Stability",
+        title_text="Walk-Forward Analysis - VectorBT Enhanced Performance Stability",
         template='plotly_dark', showlegend=True
     )
     fig.show()
@@ -560,7 +662,7 @@ def _plot_multi_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
 
     fig.update_layout(
         height=None, width=None,
-        title_text="🚶 Multi-Asset Walk-Forward Analysis - VectorBT Enhanced",
+        title_text="Multi-Asset Walk-Forward Analysis - VectorBT Enhanced",
         template='plotly_dark', showlegend=True
     )
     fig.show()
@@ -716,7 +818,7 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
         fig.show()
 
         # Print improvement summary
-        print(f"\n📈 Optimization Impact Summary:")
+        print(f"\nOptimization Impact Summary:")
         print(f"   Return: {default_values[0]:.2f}% → {optimized_values[0]:.2f}% ({optimized_values[0] - default_values[0]:+.2f}%)")
         print(f"   Sharpe: {default_values[1]:.3f} → {optimized_values[1]:.3f} ({optimized_values[1] - default_values[1]:+.3f})")
         print(f"   Max DD: {default_values[2]:.2f}% → {optimized_values[2]:.2f}% ({optimized_values[2] - default_values[2]:+.2f}%)")
@@ -725,31 +827,7 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
         return {"success": True}
         
     except Exception as e:
-        print(f"⚠️ Comparison plot failed: {e}")
-        return {"success": False, "error": str(e)}
-        fig.add_trace(go.Bar(name='Default Parameters', x=metrics_names, y=default_values, 
-                           marker_color='lightblue', opacity=0.7))
-        fig.add_trace(go.Bar(name='Optimized Parameters', x=metrics_names, y=optimized_values, 
-                           marker_color='red', opacity=0.7))
-
-        fig.update_layout(
-            title=f'{strategy_name} Strategy: Default vs Optimized Parameters',
-            xaxis_title='Metrics', yaxis_title='Values', barmode='group',
-            template='plotly_dark', height=600
-        )
-        fig.show()
-
-        # Print improvement summary
-        print("\n📈 Optimization Impact Summary:")
-        print(f"   Return: {default_values[0]:.2f}% → {optimized_values[0]:.2f}% ({optimized_values[0] - default_values[0]:+.2f}%)")
-        print(f"   Sharpe: {default_values[1]:.3f} → {optimized_values[1]:.3f} ({optimized_values[1] - default_values[1]:+.3f})")
-        print(f"   Max DD: {default_values[2]:.2f}% → {optimized_values[2]:.2f}% ({optimized_values[2] - default_values[2]:+.2f}%)")
-        print(f"   Win Rate: {default_values[3]:.1f}% → {optimized_values[3]:.1f}% ({optimized_values[3] - default_values[3]:+.1f}%)")
-
-        return {"success": True}
-
-    except Exception as e:
-        print(f"⚠️ Comparison plot failed: {e}")
+        print(f"Comparison plot failed: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -786,7 +864,7 @@ def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[s
             
             # Create default vs optimized comparison plot if both exist
             if default_portfolios and len(portfolios) > len(default_portfolios):
-                print("📊 Creating Default vs Optimized comparison...")
+                print("Creating Default vs Optimized comparison...")
                 comparison_results = create_comparison_plot(results, strategy_name)
                 if plot_results is None:
                     plot_results = {}
@@ -797,5 +875,5 @@ def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[s
         return {}
         
     except Exception as e:
-        print(f"⚠️ Visualization failed: {e}")
-        return {"error": str(e)}
+        print(f"Visualization failed: {e}")
+        return {"success": False, "error": str(e)}

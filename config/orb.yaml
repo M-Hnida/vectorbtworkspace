@@ -13,9 +13,7 @@ parameters:
   atr_multiple: 1.5 # ATR multiplier for stop loss/take profit
 
   # Multi-timeframe settings
-  required_timeframes:
-    - "15m"  # Entry timeframe
-    - "1h"   # Range definition timeframe
+  required_timeframes: ["15m","1h"]
 
 # ------------------------------------------------------------
 # Optimization Parameter Ranges

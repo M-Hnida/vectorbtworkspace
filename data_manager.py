@@ -20,7 +20,7 @@ def load_ohlc_csv(file_path: str) -> pd.DataFrame:
     # First, try to detect if the file has headers by reading the first few lines
     try:
         # Read first line to check for headers
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r',encoding='utf-8') as f:
             first_line = f.readline().strip()
 
         # Check if first line looks like headers (contains text like 'open', 'time', etc.)
@@ -163,6 +163,9 @@ def load_data_for_strategy(strategy, time_range: Optional[str] = None,
         try:
             data = _load_symbol_data(files, required_timeframes, time_range, end_date)
             all_symbols_data[symbol] = data
+            print(f"🔍 DEBUG: Loaded {symbol} with timeframes: {list(data.keys())}")
+            for tf, df in data.items():
+                print(f"   {tf}: {len(df)} bars, range: {df.index.min()} to {df.index.max()}")
         except Exception as e:
             print(f"⚠️ Failed to load data for {symbol}: {e}")
     
@@ -241,20 +244,31 @@ def _load_symbol_data(file_paths: List[str], required_timeframes: List[str],
                 print(f"   Available timeframes: {list(available_files.keys())}")
     
     if not all_dataframes:
+        print(f"🔍 DEBUG: Available files: {available_files}")
+        print(f"🔍 DEBUG: Required timeframes: {required_timeframes}")
         raise ValueError(f"No data loaded for any required timeframes: {required_timeframes}")
     
-    # Only harmonize if we have multiple timeframes or time_range is specified
-    if len(all_dataframes) > 1 or time_range is not None:
-        print("📅 Harmonizing time ranges across timeframes...")
+    print(f"🔍 DEBUG: Loaded timeframes: {list(all_dataframes.keys())}")
+    
+    # Apply time range filtering if needed
+    if len(all_dataframes) > 1:
+        print("📅 Harmonizing time ranges across multiple timeframes...")
         harmonized_data = _harmonize_time_ranges(all_dataframes, time_range, end_date)
         
         # Filter to only return required timeframes
         for tf in required_timeframes:
             if tf in harmonized_data:
                 data[tf] = harmonized_data[tf]
+    elif time_range is not None:
+        # Use optimized single timeframe filtering
+        filtered_data = _apply_time_range_filter(all_dataframes, time_range, end_date)
+        
+        # Filter to only return required timeframes
+        for tf in required_timeframes:
+            if tf in filtered_data:
+                data[tf] = filtered_data[tf]
     else:
-        # Single timeframe, no harmonization needed
-        print("📅 Single timeframe detected, skipping harmonization")
+        # Single timeframe, no time filtering needed - just return the data as-is
         for tf in required_timeframes:
             if tf in all_dataframes:
                 data[tf] = all_dataframes[tf]
@@ -293,7 +307,90 @@ def _parse_time_range(time_range: str) -> timedelta:
         raise ValueError(f"Unsupported time range format: {time_range}. Use format like '2y', '6m', '30d', '4w'")
 
 
-def _harmonize_time_ranges(dataframes: Dict[str, pd.DataFrame], 
+def _apply_time_range_filter(dataframes: Dict[str, pd.DataFrame],
+                           time_range: Optional[str] = None,
+                           end_date: Optional[Union[str, datetime]] = None) -> Dict[str, pd.DataFrame]:
+    """Apply time range filter to single or multiple dataframes.
+    
+    Args:
+        dataframes: Dictionary of timeframe -> DataFrame
+        time_range: Time range specification (e.g., '2y', '6m')
+        end_date: End date for the time range
+    
+    Returns:
+        Dictionary of filtered dataframes
+    """
+    if not dataframes:
+        return {}
+    
+    # For single timeframe, use optimized filtering
+    if len(dataframes) == 1:
+        return _filter_single_timeframe(dataframes, time_range, end_date)
+    else:
+        # For multiple timeframes, use harmonization
+        return _harmonize_time_ranges(dataframes, time_range, end_date)
+
+
+def _filter_single_timeframe(dataframes: Dict[str, pd.DataFrame],
+                            time_range: Optional[str] = None,
+                            end_date: Optional[Union[str, datetime]] = None) -> Dict[str, pd.DataFrame]:
+    """Apply time range filter to a single timeframe.
+    
+    Args:
+        dataframes: Dictionary containing single timeframe -> DataFrame
+        time_range: Time range specification (e.g., '2y', '6m')
+        end_date: End date for the time range
+    
+    Returns:
+        Dictionary containing filtered single timeframe
+    """
+    if not dataframes:
+        return {}
+    
+    # Get the single timeframe
+    tf, df = next(iter(dataframes.items()))
+    
+    if not time_range:
+        # No time range filtering needed
+        return {tf: df}
+    
+    # Parse time range
+    time_delta = _parse_time_range(time_range)
+    if not time_delta:
+        return {tf: df}
+    
+    # Determine end date
+    if end_date is None:
+        actual_end_date = df.index.max()
+    else:
+        if isinstance(end_date, str):
+            actual_end_date = pd.to_datetime(end_date)
+        else:
+            actual_end_date = end_date
+        # Don't go beyond available data
+        actual_end_date = min(actual_end_date, df.index.max())
+    
+    # Calculate start date
+    actual_start_date = actual_end_date - time_delta
+    # Don't go before available data
+    actual_start_date = max(actual_start_date, df.index.min())
+    
+    print(f"📅 Applying time range filter: {time_range}")
+    print(f"📅 Filtering data from {actual_start_date} to {actual_end_date}")
+    
+    # Apply the time range filter
+    mask = (df.index >= actual_start_date) & (df.index <= actual_end_date)
+    filtered_df = df.loc[mask].copy()
+    
+    if not filtered_df.empty:
+        print(f"✅ Filtered {tf}: {len(filtered_df)} bars ({filtered_df.index.min()} to {filtered_df.index.max()})")
+        return {tf: filtered_df}
+    else:
+        print(f"⚠️ No data available for {tf} in the specified time range")
+        return {}
+
+
+def _harmonize_time_ranges(dataframes: Dict[str, pd.DataFrame],
                           time_range: Optional[str] = None,
                           end_date: Optional[Union[str, datetime]] = None) -> Dict[str, pd.DataFrame]:
     """Harmonize time ranges across multiple dataframes.
@@ -308,6 +405,14 @@ def _harmonize_time_ranges(dataframes: Dict[str, pd.DataFrame],
     """
     if not dataframes:
         return {}
+    
+    # Debug: Log the context of harmonization
+    num_timeframes = len(dataframes)
+    print(f"🔍 DEBUG: _harmonize_time_ranges called with {num_timeframes} timeframe(s): {list(dataframes.keys())}")
+    if time_range:
+        print(f"🔍 DEBUG: Time range specified: {time_range}")
+    if end_date:
+        print(f"🔍 DEBUG: End date specified: {end_date}")
     
     # Find the common time range across all dataframes
     earliest_start = None
@@ -392,5 +497,7 @@ def _harmonize_time_ranges(dataframes: Dict[str, pd.DataFrame],
             print(f"✅ Harmonized {tf}: {len(filtered_df)} bars ({filtered_df.index.min()} to {filtered_df.index.max()})")
         else:
             print(f"⚠️ No data available for {tf} in the specified time range")
+    
+    print(f"🔍 DEBUG: Harmonization complete. Returning {len(harmonized)} timeframe(s): {list(harmonized.keys())}")
     
     return harmonized

@@ -2,7 +2,7 @@ parameters:
   rsi_period: 14
   oversold_level: 30
   overbought_level: 70
-  primary_timeframe: "1h"
+  primary_timeframe: "1H"
 
 optimization_grid:
   rsi_period: [10, 14, 21]
@@ -10,7 +10,7 @@ optimization_grid:
   overbought_level: [70, 75, 80]
 
 data_requirements:
-  required_timeframes: ["1h"]
+  required_timeframes: ["1H"]
   required_columns: ["open", "high", "low", "close"]
 
 csv_path:
