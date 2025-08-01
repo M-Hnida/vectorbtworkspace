@@ -9,8 +9,8 @@ from typing import Dict, Any, Optional
 import pandas as pd
 
 # Core imports
-from backtest import run_backtest, get_available_strategies, load_strategy_config
-from data_manager import load_data_for_strategy
+from backtest import run_backtest, get_available_strategies
+from data_manager import load_data_for_strategy, load_strategy_config
 from base import StrategyConfig
 from strategies import get_strategy_signal_function, get_required_timeframes, get_required_columns
 
@@ -21,23 +21,39 @@ warnings.filterwarnings("ignore")
 # CORE FUNCTIONS
 # ============================================================================
 
-def get_primary_data(data: Dict[str, Dict[str, pd.DataFrame]], 
+def get_primary_data(data: Dict[str, Dict[str, pd.DataFrame]],
                     strategy_config: StrategyConfig) -> tuple:
-    """Get primary symbol and timeframe data for analysis."""
+    """Get primary symbol and timeframe data for analysis (order-based, case-insensitive)."""
     if not data:
         raise ValueError("No data provided")
-    
-    primary_symbol = strategy_config.parameters.get('primary_symbol', list(data.keys())[0])
+
+    params = strategy_config.parameters or {}
+    # Select primary symbol by parameter or first key if not found (case-insensitive)
+    primary_symbol = params.get('primary_symbol', None)
+    if primary_symbol is not None:
+        sym_map = {k.lower(): k for k in data.keys()}
+        primary_symbol = sym_map.get(primary_symbol.lower(), primary_symbol)
     if primary_symbol not in data:
-        raise ValueError(f"Primary symbol '{primary_symbol}' not found in data")
-    
-    primary_timeframe = strategy_config.parameters.get('primary_timeframe', 
-                                                      list(data[primary_symbol].keys())[0])
-    if primary_timeframe not in data[primary_symbol]:
-        raise ValueError(f"Primary timeframe '{primary_timeframe}' not found for {primary_symbol}")
-    
-    primary_data = data[primary_symbol][primary_timeframe]
-    return primary_symbol, primary_timeframe, primary_data
+        primary_symbol = list(data.keys())[0]
+
+    # Select timeframe by case-insensitive match, fallback to first available
+    available_tfs = data[primary_symbol]
+    requested_tf = params.get('primary_timeframe')
+    keys = list(available_tfs.keys())
+    chosen_tf = None
+    if requested_tf:
+        req = requested_tf.lower()
+        for k in keys:
+            if k.lower() == req:
+                chosen_tf = k
+                break
+    if chosen_tf is None:
+        chosen_tf = keys[0]
+
+    primary_data = available_tfs[chosen_tf]
+    # Update parameters to reflect the chosen timeframe for downstream consistency
+    strategy_config.parameters['primary_timeframe'] = chosen_tf
+    return primary_symbol, chosen_tf, primary_data
 
 
 def generate_signals_for_strategy(strategy_name: str, parameters: dict, tf_data: Dict[str, pd.DataFrame]):
@@ -59,13 +75,19 @@ def run_single_backtest(symbol: str, timeframe: str, timeframes: Dict[str, pd.Da
             tf_data = {timeframe: timeframes[timeframe]}
             primary_data = timeframes[timeframe]
         
-        # Generate signals and run backtest
+        # Generate signals
         signals = generate_signals_for_strategy(strategy_name, parameters, tf_data)
-        portfolio = run_backtest(primary_data, signals)
+
+        # Get portfolio params via unified hook
+        from strategies import get_portfolio_params
+        vbt_params = get_portfolio_params(strategy_name, primary_data, parameters)
+
+        # Run backtest
+        portfolio = run_backtest(primary_data, signals, vbt_params=vbt_params)
         
         # Log results
         total_return = portfolio.stats()['Total Return [%]'] #type:ignore
-        tf_label = f" (Multi-TF)" if is_multi_tf else ""
+        tf_label = " (Multi-TF)" if is_multi_tf else ""
         print(f"✅ {symbol} {timeframe}{tf_label}: {total_return:.2f}%")
         
         return portfolio
@@ -87,16 +109,27 @@ def run_full_backtest(data: Dict[str, Dict[str, pd.DataFrame]],
         
         if len(required_tfs) > 1:
             # Multi-timeframe strategy
-            primary_tf = required_tfs[0]
-            if primary_tf in timeframes:
+            requested_primary = parameters.get('primary_timeframe', required_tfs[0] if required_tfs else None)
+            keys = list(timeframes.keys())
+            chosen_tf = None
+            if requested_primary:
+                req = requested_primary.lower()
+                for k in keys:
+                    if k.lower() == req:
+                        chosen_tf = k
+                        break
+            if chosen_tf is None and keys:
+                chosen_tf = keys[0]
+
+            if chosen_tf in timeframes:
                 portfolio = run_single_backtest(
-                    symbol, primary_tf, timeframes, strategy_name, parameters, required_tfs, is_multi_tf=True
+                    symbol, chosen_tf, timeframes, strategy_name, parameters, required_tfs, is_multi_tf=True
                 )
                 if portfolio:
-                    results[symbol][primary_tf] = portfolio
+                    results[symbol][chosen_tf] = portfolio
         else:
             # Single timeframe strategy - run on all available timeframes
-            for timeframe, df in timeframes.items():
+            for timeframe in timeframes.keys():
                 portfolio = run_single_backtest(
                     symbol, timeframe, timeframes, strategy_name, parameters, required_tfs, is_multi_tf=False
                 )
@@ -124,7 +157,8 @@ def run_fast_analysis(strategy_name: str, strategy_config: StrategyConfig, data:
     print("\n📊 Generating Portfolio Plots")
     from plotter import plot_comprehensive_analysis
     flattened_portfolios = flatten_portfolios(portfolio_results)
-    visualization_results = plot_comprehensive_analysis(flattened_portfolios, strategy_config.name)
+    # No Monte Carlo in fast mode; explicitly set show to optimized
+    visualization_results = plot_comprehensive_analysis(flattened_portfolios, strategy_config.name, mc_results=None, wf_results=None, show="optimized")
     
     return {
         'portfolios': portfolio_results,
@@ -215,48 +249,55 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
     }
     
     from plotter import create_visualizations
+    # Prefer showing Monte Carlo by default when available
     visualization_results = create_visualizations(visualization_data, strategy_config.name)
     results['visualizations'] = visualization_results
     
     return results
 
 
-def run_strategy_analysis(strategy_name: str, fast_mode: bool = False, 
+def run_strategy_analysis(strategy_name: str, fast_mode: bool = False,
                          time_range: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
     """Run complete strategy analysis pipeline."""
     try:
         # Load strategy and data
-        strategy_config = load_strategy_config(strategy_name)
+        raw_config = load_strategy_config(strategy_name)  # returns dict
+        # Normalize to StrategyConfig-like shape for this module
+        parameters = (raw_config or {}).get('parameters', {})
+        strategy_config = StrategyConfig(
+            name=strategy_name,
+            parameters=parameters,
+            optimization_grid=(raw_config or {}).get('optimization_grid', {}),
+            analysis_settings=(raw_config or {}).get('analysis_settings', {}),
+            data_requirements=(raw_config or {}).get('data_requirements', {})
+        )
         print(f"📊 Loading data with time range: {time_range or 'full dataset'}")
-        
+
         # Create simple strategy context for data loading
         class StrategyContext:
             """Simple strategy context for data loading operations."""
             name = strategy_name
-            
+
             def get_required_timeframes(self):
-                """Get required timeframes for the strategy."""
                 return get_required_timeframes(strategy_name, strategy_config.parameters)
-            
+
             def get_required_columns(self):
-                """Get required columns for the strategy."""
                 return get_required_columns(strategy_name)
-            
+
             def get_parameter(self, key, default=None):
-                """Get strategy parameter value."""
                 return strategy_config.parameters.get(key, default)
-        
+
         strategy_context = StrategyContext()
         data = load_data_for_strategy(strategy_context, time_range, end_date)
         _, _, primary_data = get_primary_data(data, strategy_config)
-        
+
         if fast_mode:
             results = run_fast_analysis(strategy_name, strategy_config, data)
         else:
             results = run_full_analysis(strategy_name, strategy_config, data, primary_data)
-        
+
         return {"success": True, "results": results}
-        
+
     except Exception as e:
         error_msg = f"Strategy analysis failed: {e}"
         print(f"❌ {error_msg}")
@@ -267,24 +308,25 @@ def run_strategy_analysis(strategy_name: str, fast_mode: bool = False,
 # MAIN APPLICATION
 # ============================================================================
 
-def run_strategy_pipeline(strategy_name: str, time_range: Optional[str] = None, 
+def run_strategy_pipeline(strategy_name: str, time_range: Optional[str] = None,
                          end_date: Optional[str] = None, skip_optimization: bool = False) -> Dict[str, Any]:
-    """Run complete strategy pipeline."""
-    try:
-        print(f"\n🚀 Starting {strategy_name} strategy...")
-        results = run_strategy_analysis(strategy_name, skip_optimization, time_range, end_date)
-        
-        if results["success"]:
-            print("✅ Strategy pipeline completed successfully!")
-        else:
-            print(f"❌ Strategy pipeline failed: {results['error']}")
-            
-        return results
-        
-    except Exception as e:
-        error_msg = f"Pipeline error: {e}"
-        print(f"❌ {error_msg}")
-        return {"success": False, "error": error_msg}
+    """Run complete strategy pipeline.
+
+    Note: run_strategy_analysis already handles exceptions and returns a structured result.
+    Avoid redundant try/except here to prevent duplicated error handling.
+    """
+    print(f"\n🚀 Starting {strategy_name} strategy...")
+    results = run_strategy_analysis(strategy_name, skip_optimization, time_range, end_date)
+
+    if isinstance(results, dict) and results.get("success", False):
+        print("✅ Strategy pipeline completed successfully!")
+    else:
+        # Defensive extract of error message if present
+        err = None
+        if isinstance(results, dict):
+            err = results.get("error")
+        print(f"❌ Strategy pipeline failed{f': {err}' if err else ''}")
+    return results
 
 
 def get_user_strategy_choice() -> Optional[str]:

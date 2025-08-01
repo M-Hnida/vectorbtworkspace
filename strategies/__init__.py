@@ -68,3 +68,20 @@ def get_required_columns(name: str):
     if name not in STRATEGY_METADATA:
         raise ValueError(f"Unknown strategy: {name}. Available: {list(STRATEGY_METADATA.keys())}")
     return STRATEGY_METADATA[name]['columns']
+
+# --- New: portfolio params hook ------------------------------------------------
+def get_portfolio_params(name: str, primary_data, params: dict) -> dict:
+    """
+    Optional hook to fetch per-strategy portfolio params (e.g., trailing stop, TP).
+    Looks for strategies.<name>.get_vbt_params(primary_data, params) and returns its dict.
+    If not present, returns {}.
+    """
+    try:
+        strategy_module = __import__(f"strategies.{name}", fromlist=["*"])
+        if hasattr(strategy_module, "get_vbt_params"):
+            fn = getattr(strategy_module, "get_vbt_params")
+            result = fn(primary_data, params)
+            return result if isinstance(result, dict) else {}
+    except Exception:
+        pass
+    return {}

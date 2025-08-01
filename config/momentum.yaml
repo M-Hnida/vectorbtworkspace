@@ -1,32 +1,41 @@
-name: "momentum_strategy"
 parameters:
-  # Portfolio settings
-  cash: 100000
-  fees: 0.001
-  slippage: 0.001
-  risk_pct: 0.01
-  vol_adjust: true
-
-  # Strategy indicators
-  volatility_momentum_window: 5
-  volatility_momentum_threshold: 0.001
-  volatility_reversal_threshold: 0
-  price_wma_window: 50
+  # Volatility momentum parameters
+  vol_momentum_window: 20
+  vol_momentum_threshold: 0.0
+  vol_std_window: 20
+  
+  # WMA trend alignment
+  wma_length: 50
+  
+  # ATR-based stop loss
   atr_length: 14
+  atr_mult: 2.0
+  
+  # Profit target (percentage)
+  profit_target_percent: 0.02  # 2%
+  
+  # Trailing stop (percentage)
+  trailing_stop_percent: 0.01  # 1%
+  
+  # Timeframe settings
+  primary_timeframe: "1h"
+  required_timeframes: ["1h"]
 
-  # Multi-timeframe settings
-  required_timeframes:
-    - "1h"
-
-
-optimization_grid:
-  volatility_window: [10, 15, 20]
-  volatility_momentum_window: [3, 5, 7]
-  volatility_momentum_threshold: [0.001, 0.0015, 0.002]
-  higher_wma_window: [20, 60, 100]
-
-analysis_settings:
-  monte_carlo_runs: 5
-
+# Data requirements
 csv_path:
   - "data/EURUSD_1H_2009-2025.csv"
+
+# Optimization grid for parameter tuning
+optimization_grid:
+  vol_momentum_window: [15, 20, 25]
+  vol_momentum_threshold: [0.0, 0.1, 0.2]
+  wma_length: [30, 50, 70]
+  atr_mult: [1.5, 2.0, 2.5]
+  profit_target_percent: [0.015, 0.02, 0.025]
+  trailing_stop_percent: [0.008, 0.01, 0.012]
+
+# Analysis settings
+analysis_settings:
+  plot_signals: true
+  show_trades: true
+  calculate_metrics: true

@@ -65,9 +65,7 @@ def get_tdi_required_timeframes(params: Dict) -> List[str]:
     return params.get('required_timeframes', ['15m', '30m', '1h', '4h', '1D'])
 
 
-def get_tdi_required_columns() -> List[str]:
-    """Get required columns for TDI strategy."""
-    return ['open', 'high', 'low', 'close']
+
 
 
 def generate_tdi_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:

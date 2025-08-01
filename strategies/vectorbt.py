@@ -193,9 +193,7 @@ def get_vectorbt_required_timeframes(params: Dict) -> List[str]:
     return params.get('required_timeframes', ['1h'])
 
 
-def get_vectorbt_required_columns() -> List[str]:
-    """Get required columns for VectorBT strategy."""
-    return ['open', 'high', 'low', 'close']
+
 
 
 

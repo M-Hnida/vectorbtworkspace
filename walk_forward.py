@@ -4,11 +4,11 @@ Walk-Forward Analysis - Simple and Practical Implementation
 """
 
 import pandas as pd
-from strategies import get_strategy_function
+from strategies import get_strategy_signal_function
 from typing import Dict, Any
 from backtest import run_backtest
 
-
+ 
 def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
     """Run walk-forward analysis with proper train/test metrics."""
     try:
@@ -19,7 +19,7 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
         window_size = len(data) // 4  # 25% windows
         step_size = window_size // 2  # 50% overlap
         
-        signal_func = get_strategy_function(strategy.name)
+        signal_func = get_strategy_signal_function(strategy.name)
         windows = []
         
         for i in range(0, len(data) - window_size, step_size):
@@ -39,15 +39,15 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
             try:
                 # Train period
                 train_signals = signal_func(
-                    {strategy.get_required_timeframes()[0]: train_data}, 
+                    {strategy.get_required_timeframes()[0]: train_data},
                     strategy.parameters
                 )
                 train_portfolio = run_backtest(train_data, train_signals)
                 train_stats = train_portfolio.stats()
                 
-                # Test period  
+                # Test period
                 test_signals = signal_func(
-                    {strategy.get_required_timeframes()[0]: test_data}, 
+                    {strategy.get_required_timeframes()[0]: test_data},
                     strategy.parameters
                 )
                 test_portfolio = run_backtest(test_data, test_signals)

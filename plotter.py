@@ -28,8 +28,16 @@ def create_performance_plots(portfolios: Dict[str, Any], strategy_name: str) -> 
 
 def plot_comprehensive_analysis(portfolios, strategy_name: str = "Trading Strategy",
                                 mc_results: Optional[Dict[str, Any]] = None,
-                                wf_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Plot everything: portfolios, Monte Carlo, and walk-forward analysis."""
+                                wf_results: Optional[Dict[str, Any]] = None,
+                                show: str = "auto") -> Dict[str, Any]:
+    """Plot everything: portfolios, Monte Carlo, and walk-forward analysis.
+    
+    Args:
+        portfolios: dict of name -> vbt.Portfolio
+        mc_results: results from optimizer.run_monte_carlo_analysis
+        wf_results: walk-forward results
+        show: "auto" | "monte_carlo" | "optimized". If "auto", defaults to Monte Carlo if available.
+    """
     try:
         if not portfolios:
             print("Warning: No portfolios provided")
@@ -38,11 +46,18 @@ def plot_comprehensive_analysis(portfolios, strategy_name: str = "Trading Strate
         if not isinstance(portfolios, dict):
             portfolios = {"Portfolio": portfolios}
 
+        # Decide default view
+        has_mc = bool(mc_results) and ('error' not in mc_results)
+        if show == "auto":
+            show = "monte_carlo" if has_mc else "optimized"
+
+        # Always render portfolios first for consistency
         _plot_portfolios(portfolios, strategy_name)
 
-        if mc_results and 'error' not in mc_results:
+        # MC visualization first if requested/available
+        if has_mc:
             print("Plotting Monte Carlo analysis...")
-            _plot_monte_carlo(mc_results)
+            _plot_monte_carlo(mc_results, preferred_view=show)
 
         if wf_results and 'error' not in wf_results:
             print("Plotting walk-forward analysis...")
@@ -164,20 +179,38 @@ def _create_vectorbt_comparison(portfolios: Dict[str, Any], strategy_name: str):
     except Exception as e:
         print(f"VectorBT comparison plot failed: {e}")
 
-def _plot_monte_carlo(mc_results: Dict[str, Any]) -> Dict[str, Any]:
-    """Plot Monte Carlo results with parameter sensitivity analysis."""
+def _plot_monte_carlo(mc_results: Dict[str, Any], preferred_view: str = "monte_carlo") -> Dict[str, Any]:
+    """Plot Monte Carlo results with parameter sensitivity analysis and path-matrix support."""
     try:
         simulations = mc_results.get('simulations', [])
         statistics = mc_results.get('statistics', {})
+        path_matrix = mc_results.get('path_matrix', None)
 
-        if not simulations:
+        # Robustly extract numeric returns_data for histogram
+        returns_data = []
+        for sim in simulations:
+            r = sim.get('total_return')
+            if r is None:
+                continue
+            try:
+                r = float(r)
+            except Exception:
+                continue
+            if np.isfinite(r):
+                returns_data.append(r)
+
+        # Ensure numpy array for path_matrix
+        if path_matrix is not None:
+            try:
+                path_matrix = np.asarray(path_matrix, dtype=float)
+            except Exception:
+                path_matrix = None
+
+        if (not simulations or len(returns_data) == 0) and (path_matrix is None or path_matrix.size == 0):
+            print("Error: No simulations or path matrix available for Monte Carlo plot")
             return {"success": False, "reason": "no_simulations"}
 
-        returns_data = [sim['total_return'] for sim in simulations]
-        if not returns_data:
-            return {"success": False, "reason": "no_data"}
-
-        # Create the subplot figure
+        # Create figure
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=[
@@ -190,13 +223,20 @@ def _plot_monte_carlo(mc_results: Dict[str, Any]) -> Dict[str, Any]:
                    [{"secondary_y": False}, {"secondary_y": False}]]
         )
 
-        # Add all subplot components
+        # Add histogram and parameter sensitivity
         _add_mc_histogram(fig, returns_data, statistics)
         _add_parameter_sensitivity(fig, simulations)
+
+        # Inject path_matrix for downstream function (avoids copying)
+        setattr(_add_mc_percentiles, "_path_matrix_ref", path_matrix)
+
+        # Add path view using path_matrix when available; fallback to sampled equity_curve traces
         _add_mc_percentiles(fig, returns_data, statistics)
+
+        # Comparison panel (auto-scale y dynamically from data)
         _add_mc_comparison(fig, statistics)
 
-        # Configure layout and show
+        # Layout
         fig.update_layout(
             title="Monte Carlo Analysis - Parameter Sensitivity",
             template='plotly_dark',
@@ -223,38 +263,57 @@ def _plot_monte_carlo(mc_results: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _add_mc_histogram(fig: go.Figure, returns_data: list, statistics: dict) -> None:
-    """Add clean histogram """
-    if not returns_data:
+    """Add robust histogram for MC returns with NaN/Inf guards."""
+    # Accept both list and np array
+    try:
+        arr = np.asarray(returns_data, dtype=float)
+    except Exception:
+        return
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        print("Error: No finite returns for histogram")
         return
 
-    # Calculate optimal number of bins based on data
-    n_bins = min(50, max(10, int(np.sqrt(len(returns_data)))))
-    
+    # Use FD rule, fallback to sqrt; ensure at least 5 bins
+    try:
+        q75, q25 = np.percentile(arr, [75, 25])
+        iqr = q75 - q25
+        bin_width = 2 * iqr / np.cbrt(arr.size) if iqr > 0 else 0
+        if bin_width > 0:
+            n_bins = int(np.clip(np.ceil((arr.max() - arr.min()) / bin_width), 5, 100))
+        else:
+            n_bins = int(np.clip(np.sqrt(arr.size), 5, 50))
+    except Exception:
+        n_bins = int(np.clip(np.sqrt(arr.size), 5, 50))
+
     fig.add_trace(go.Histogram(
-        x=returns_data,
-        nbinsx=n_bins,
+        x=arr.tolist(),
+        nbinsx=int(n_bins),
         name='Random Returns',
-        opacity=0.7,
+        opacity=0.8,
         marker_color='lightblue',
         showlegend=True
-        # histnorm defaults to '' which shows raw counts
     ), row=1, col=1)
 
+    # Strategy marker
     actual_return = statistics.get('actual_return')
     if actual_return is not None:
-        # Get the maximum frequency using the same binning as the histogram
-        hist_counts, bin_edges = np.histogram(returns_data, bins=n_bins)
-        max_count = max(hist_counts) if len(hist_counts) > 0 else 1
-
-        fig.add_shape(
-            type="line", x0=actual_return, x1=actual_return, y0=0, y1=max_count,
-            line={"dash": "dash", "color": "red", "width": 3},
-            xref="x1", yref="y1"
-        )
-        fig.add_annotation(
-            x=actual_return, y=max_count * 0.9, text=f"Strategy: {actual_return:.2f}%",
-            showarrow=True, arrowcolor="red", xref="x1", yref="y1"
-        )
+        try:
+            ar = float(actual_return)
+        except Exception:
+            ar = None
+        if ar is not None and np.isfinite(ar):
+            hist_counts, _ = np.histogram(arr, bins=int(n_bins))
+            max_count = float(hist_counts.max()) if hist_counts.size > 0 else 1.0
+            fig.add_shape(
+                type="line", x0=ar, x1=ar, y0=0, y1=max_count,
+                line={"dash": "dash", "color": "red", "width": 3},
+                xref="x1", yref="y1"
+            )
+            fig.add_annotation(
+                x=ar, y=max_count * 0.9, text=f"Strategy: {ar:.2f}%",
+                showarrow=True, arrowcolor="red", xref="x1", yref="y1"
+            )
 
 
 def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
@@ -383,129 +442,168 @@ def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
 
 
 def _add_mc_percentiles(fig: go.Figure, returns_data: list, statistics: dict) -> None:
-    """Add Monte Carlo simulation paths visualization."""
-    if not returns_data:
-        return
+    """Add Monte Carlo simulation paths visualization using path_matrix if present."""
+    # Try to access path_matrix injected by _plot_monte_carlo
+    path_matrix = getattr(_add_mc_percentiles, "_path_matrix_ref", None)
 
-    # Get simulation data from statistics if available
+    if path_matrix is not None:
+        try:
+            arr = np.asarray(path_matrix)
+            if arr.ndim == 2 and arr.size > 0:
+                T, N = arr.shape
+                max_paths = min(100, N)
+                cols = np.linspace(0, N - 1, max_paths, dtype=int) if N > max_paths else np.arange(N, dtype=int)
+                max_T = 1000
+                t_idx = np.arange(0, T, int(np.ceil(T / max_T)), dtype=int) if T > max_T else np.arange(T, dtype=int)
+
+                for j, c in enumerate(cols):
+                    series = arr[t_idx, c]
+                    if series.size == 0 or not np.isfinite(series).any():
+                        continue
+                    fig.add_trace(go.Scatter(
+                        y=series.astype(float),
+                        mode='lines',
+                        line={'color': 'rgba(100,149,237,0.25)', 'width': 1},
+                        name='MC Simulation' if j == 0 else None,
+                        showlegend=(j == 0),
+                        hovertemplate="MC Path<br>Return: %{y:.2f}%<extra></extra>"
+                    ), row=2, col=1)
+
+                # Overlay strategy equity if provided
+                strategy_equity = statistics.get('strategy_equity_curve', [])
+                if strategy_equity:
+                    se = np.asarray(strategy_equity, dtype=float)
+                    if se.size > 1 and np.isfinite(se[0]) and se[0] != 0:
+                        strat_norm = (se / se[0] - 1.0) * 100.0
+                        if strat_norm.size > t_idx.size:
+                            strat_norm = strat_norm[:t_idx.size]
+                        fig.add_trace(go.Scatter(
+                            y=strat_norm.astype(float),
+                            mode='lines',
+                            line={'color': 'red', 'width': 3},
+                            name='Your Strategy',
+                            showlegend=True
+                        ), row=2, col=1)
+                return
+        except Exception as e:
+            print(f"MC path_matrix plotting failed: {e}")
+
+    # Legacy fallback: sample equity_curve from simulations if available
     simulations = statistics.get('simulations', [])
-    
-    if simulations and len(simulations) > 0:
-        # Plot individual simulation paths (sample a subset to avoid clutter)
-        max_paths = min(50, len(simulations))  # Show max 50 paths
+    if isinstance(simulations, list) and len(simulations) > 0:
+        max_paths = min(50, len(simulations))
         sample_indices = np.linspace(0, len(simulations)-1, max_paths, dtype=int)
-        
         for i, idx in enumerate(sample_indices):
             sim = simulations[idx]
-            if 'equity_curve' in sim and sim['equity_curve'] is not None:
-                equity_curve = sim['equity_curve']
-                # Normalize to percentage change from start
-                if len(equity_curve) > 0:
-                    normalized_curve = [(val / equity_curve[0] - 1) * 100 for val in equity_curve]
-                    
-                    fig.add_trace(go.Scatter(
-                        y=normalized_curve,
-                        mode='lines',
-                        line={'color': 'rgba(100,149,237,0.3)', 'width': 1},
-                        name='MC Simulation' if i == 0 else None,
-                        showlegend=(i == 0),
-                        hovertemplate="Path %{fullData.name}<br>Return: %{y:.2f}%<extra></extra>"
-                    ), row=2, col=1)
-        
-        # Add strategy performance if available
-        actual_return = statistics.get('actual_return')
-        if actual_return is not None:
-            # Add strategy line (assuming we have the actual equity curve)
-            strategy_equity = statistics.get('strategy_equity_curve', [])
-            if strategy_equity:
-                strategy_normalized = [(val / strategy_equity[0] - 1) * 100 for val in strategy_equity]
+            eq = sim.get('equity_curve')
+            if eq is None or len(eq) == 0:
+                continue
+            s0 = eq[0]
+            if s0 is None or s0 == 0 or not np.isfinite(s0):
+                continue
+            normalized_curve = ((np.asarray(eq, dtype=float) / float(s0)) - 1.0) * 100.0
+            normalized_curve = normalized_curve[np.isfinite(normalized_curve)]
+            if normalized_curve.size == 0:
+                continue
+            fig.add_trace(go.Scatter(
+                y=normalized_curve.tolist(),
+                mode='lines',
+                line={'color': 'rgba(100,149,237,0.25)', 'width': 1},
+                name='MC Simulation' if i == 0 else None,
+                showlegend=(i == 0),
+                hovertemplate="MC Path<br>Return: %{y:.2f}%<extra></extra>"
+            ), row=2, col=1)
+        # Strategy overlay
+        strategy_equity = statistics.get('strategy_equity_curve', [])
+        if strategy_equity:
+            se = np.asarray(strategy_equity, dtype=float)
+            if se.size > 1 and np.isfinite(se[0]) and se[0] != 0:
+                strat_norm = (se / se[0] - 1.0) * 100.0
                 fig.add_trace(go.Scatter(
-                    y=strategy_normalized,
+                    y=strat_norm.astype(float),
                     mode='lines',
                     line={'color': 'red', 'width': 3},
                     name='Your Strategy',
                     showlegend=True
                 ), row=2, col=1)
-            else:
-                # If no equity curve, just show final return as horizontal line
-                fig.add_shape(
-                    type="line", x0=0, x1=len(normalized_curve) if 'normalized_curve' in locals() else 100,
-                    y0=actual_return, y1=actual_return,
-                    line={"color": "red", "width": 3},
-                    xref="x3", yref="y3"
-                )
-                fig.add_annotation(
-                    x=50, y=actual_return, text=f"Strategy: {actual_return:.2f}%",
-                    showarrow=True, arrowcolor="red", xref="x3", yref="y3"
-                )
-    else:
-        # Fallback to percentile analysis if no simulation paths available
-        percentiles = [5, 10, 25, 50, 75, 90, 95]
-        percentile_values = [np.percentile(returns_data, p) for p in percentiles]
+        return
 
-        fig.add_trace(go.Scatter(
-            x=percentiles, y=percentile_values, mode='lines+markers',
-            name='Random Performance Curve', line={'color': 'cyan', 'width': 3},
-            marker={'size': 8}, showlegend=True
-        ), row=2, col=1)
-
-        # Add strategy performance point
-        actual_return = statistics.get('actual_return')
-        if actual_return is not None:
-            percentile_rank = statistics.get('percentile_rank', 50)
+    # Last resort: percentile curve only if no paths available
+    if returns_data:
+        arr = np.asarray(returns_data, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size > 0:
+            percentiles = [5, 10, 25, 50, 75, 90, 95]
+            percentile_values = [float(np.percentile(arr, p)) for p in percentiles]
             fig.add_trace(go.Scatter(
-                x=[percentile_rank], y=[actual_return], mode='markers',
-                name='Your Strategy', marker={'color': 'red', 'size': 12, 'symbol': 'diamond'},
-                showlegend=True
+                x=percentiles, y=percentile_values, mode='lines+markers',
+                name='Random Performance Curve', line={'color': 'cyan', 'width': 3},
+                marker={'size': 8}, showlegend=True
             ), row=2, col=1)
+            actual_return = statistics.get('actual_return')
+            if actual_return is not None and np.isfinite(actual_return):
+                percentile_rank = statistics.get('percentile_rank', 50)
+                fig.add_trace(go.Scatter(
+                    x=[percentile_rank], y=[actual_return], mode='markers',
+                    name='Your Strategy', marker={'color': 'red', 'size': 12, 'symbol': 'diamond'},
+                    showlegend=True
+                ), row=2, col=1)
 
 
 def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
-    """Add performance comparison subplot to Monte Carlo plot."""
-    mean_random = statistics.get('mean_return', 0)
-    std_random = statistics.get('std_return', 1)
-    actual_return = statistics.get('actual_return', 0)
+    """Add performance comparison subplot to Monte Carlo plot with dynamic scaling."""
+    mean_random = statistics.get('mean_return', 0.0)
+    std_random = statistics.get('std_return', 0.0)
+    actual_return = statistics.get('actual_return', 0.0)
 
-    # Debug print to check values
-    print(f"   Debug - Mean Random: {mean_random:.3f}%, Std: {std_random:.3f}%, Strategy: {actual_return:.3f}%")
+    # Guard for non-finite inputs
+    values = np.array([mean_random, actual_return, mean_random + std_random, mean_random - std_random], dtype=float)
+    if not np.isfinite(values).any():
+        print("Error: Non-finite comparison values, skipping comparison panel")
+        return
 
-    # Create comparison data with proper labels
     categories = ['Random\nMean', 'Strategy', 'Random\n+1σ', 'Random\n-1σ']
-    values = [mean_random, actual_return, mean_random + std_random, mean_random - std_random]
     colors = ['lightgray', 'red', 'lightgreen', 'orange']
 
-    # Add bars with better formatting
-    for i, (category, val, color) in enumerate(zip(categories, values, colors)):
-        showlegend = i < 2  # Only show legend for main items
-        
-        # Choose text position based on bar value to prevent overflow
-        text_position = 'outside' if val < 0 else 'inside'
+    # Add bars
+    for i, (category, val, color) in enumerate(zip(categories, values.tolist(), colors)):
+        showlegend = i < 2
+        # Use 'outside' when absolute value is small to keep labels readable
+        text_position = 'outside' if abs(val) < 1 else 'inside'
         text_color = 'white' if text_position == 'inside' else color
-        
+
         fig.add_trace(go.Bar(
             x=[category], y=[val], marker_color=color,
             name=category.replace('\n', ' ') if showlegend else None,
             showlegend=showlegend,
-            text=f'{val:.1f}%',
+            text=f'{val:.2f}%',
             textposition=text_position,
             textfont=dict(color=text_color, size=10)
         ), row=2, col=2)
 
-    # Add zero reference line
+    # Zero reference
     fig.add_shape(
         type="line", x0=-0.5, x1=3.5, y0=0, y1=0,
         line={"dash": "dot", "color": "white", "width": 1},
         xref="x4", yref="y4"
     )
 
-    # Add performance interpretation with better positioning
+    # Dynamic y-axis scaling with 15% headroom
+    vmax = float(np.nanmax(values))
+    vmin = float(np.nanmin(values))
+    if vmax == vmin:
+        pad = 1.0 or abs(vmax) * 0.15
+        ymin, ymax = vmin - pad, vmax + pad
+    else:
+        span = vmax - vmin
+        pad = span * 0.15
+        ymin, ymax = vmin - pad, vmax + pad
+    fig.update_yaxes(range=[ymin, ymax], row=2, col=2)
+
+    # Interpretation label placed relative to scaled axis
     performance_text = "Outperforming" if actual_return > mean_random else "Underperforming"
-    
-    # Position annotation above the highest positive value or below if all negative
-    y_pos = max(values) + abs(max(values)) * 0.1 if max(values) > 0 else min(values) - abs(min(values)) * 0.1
-    
     fig.add_annotation(
-        x=1.5, y=y_pos, text=f"Strategy is {performance_text} vs Random",
+        x=1.5, y=ymax - (ymax - ymin) * 0.08, text=f"Strategy is {performance_text} vs Random",
         showarrow=False, xref="x4", yref="y4", font=dict(size=11, color="white"),
         bgcolor="rgba(0,0,0,0.5)", bordercolor="white", borderwidth=1
     )

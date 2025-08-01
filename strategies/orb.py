@@ -50,9 +50,7 @@ def get_orb_required_timeframes(params: Dict) -> List[str]:
     return params.get('required_timeframes', ['15m', '1h'])
 
 
-def get_orb_required_columns() -> List[str]:
-    """Get required columns for ORB strategy."""
-    return ['open', 'high', 'low', 'close']
+
 
 
 def generate_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:

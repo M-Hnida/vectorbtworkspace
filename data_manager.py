@@ -105,40 +105,44 @@ def load_strategy_config(strategy_name: str) -> Dict:
     
     return config
 
-def load_data_for_strategy(strategy, time_range: Optional[str] = None, 
+def _select_timeframe(available: Dict[str, pd.DataFrame], requested: Optional[str]) -> str:
+    """
+    Select timeframe by order with case-insensitive match.
+
+    Rules:
+      1) If requested is provided, match ignoring case.
+      2) Otherwise, return the first available key (insertion order).
+    """
+    if not available:
+        raise ValueError("No timeframes available")
+
+    keys = list(available.keys())
+    if requested:
+        req = requested.lower()
+        for k in keys:
+            if k.lower() == req:
+                return k
+    return keys[0]
+
+
+def load_data_for_strategy(strategy, time_range: Optional[str] = None,
                           end_date: Optional[Union[str, datetime]] = None) -> Dict[str, Dict[str, pd.DataFrame]]:
-    """Load all necessary data for a given strategy with optional time range control.
-    
-    Args:
-        strategy: The trading strategy instance
-        time_range: Time range specification (e.g., '2y', '6m', '1y', '3m')
-        end_date: End date for the time range (defaults to most recent data)
+    """Load data and return a dict: symbol -> timeframe -> DataFrame.
+
+    Timeframe assignment is order-based, and lookups are case-insensitive per STYLE_GUIDE.
     """
     required_timeframes = strategy.get_required_timeframes()
-    
-    # Try to get csv_path from strategy parameters first, then from config root
+
+    # Get csv_path list
     csv_paths = strategy.get_parameter('csv_path', [])
-    
-    # If not found in parameters, check if it's in the config root level
     if not csv_paths:
-        # Load the raw config to check for csv_path at root level
-        # Try both the strategy name and the strategy name without "_strategy" suffix
-        strategy_names_to_try = [strategy.name]
-        if strategy.name.endswith('_strategy'):
-            strategy_names_to_try.append(strategy.name.replace('_strategy', ''))
-        
-        for name in strategy_names_to_try:
-            try:
-                config_dict = load_strategy_config(name)
-                csv_paths = config_dict.get('csv_path', [])
-                if csv_paths:
-                    break
-            except Exception:
-                continue
+        try:
+            config = load_strategy_config(strategy.name)
+            csv_paths = config.get('csv_path', [])
+        except Exception:
+            csv_paths = []
 
     if not csv_paths:
-        # If no csv_path in strategy config, try to find any available data file
-        # This provides fallback behavior when csv_path is not specified
         data_dir = 'data'
         if os.path.exists(data_dir):
             csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
@@ -149,26 +153,68 @@ def load_data_for_strategy(strategy, time_range: Optional[str] = None,
         else:
             raise ValueError("No csv_path defined in strategy configuration and no data directory found")
 
-    # Group files by symbol and load each symbol's data
-    symbol_files = {}
+    # Group files by symbol, preserving order
+    symbol_files: Dict[str, List[str]] = {}
     for path in csv_paths:
         symbol = os.path.basename(path).split('_')[0]
-        if symbol not in symbol_files:
-            symbol_files[symbol] = []
-        symbol_files[symbol].append(path)
-    
-    # Load data for each symbol
-    all_symbols_data = {}
+        symbol_files.setdefault(symbol, []).append(path)
+
+    all_symbols_data: Dict[str, Dict[str, pd.DataFrame]] = {}
+
     for symbol, files in symbol_files.items():
         try:
-            data = _load_symbol_data(files, required_timeframes, time_range, end_date)
-            all_symbols_data[symbol] = data
-            print(f"🔍 DEBUG: Loaded {symbol} with timeframes: {list(data.keys())}")
-            for tf, df in data.items():
-                print(f"   {tf}: {len(df)} bars, range: {df.index.min()} to {df.index.max()}")
+            data: Dict[str, pd.DataFrame] = {}
+
+            # Map files to timeframes by position
+            if len(files) == 1 and required_timeframes:
+                timeframe = required_timeframes[0]
+                data[timeframe] = load_ohlc_csv(files[0])
+                print(f"✅ Loaded {timeframe} data from {files[0]} ({len(data[timeframe])} bars)")
+            else:
+                for idx, timeframe in enumerate(required_timeframes):
+                    if idx < len(files):
+                        file_path = files[idx]
+                        data[timeframe] = load_ohlc_csv(file_path)
+                        print(f"✅ Loaded {timeframe} data from {file_path} ({len(data[timeframe])} bars)")
+                    else:
+                        print(f"⚠️ No CSV file provided for timeframe {timeframe} (position {idx})")
+
+            if not data:
+                raise ValueError(f"No data loaded for {symbol}")
+
+            # Apply time range filter or harmonization
+            if len(data) > 1:
+                print("📅 Harmonizing time ranges across multiple timeframes...")
+                harmonized = _harmonize_time_ranges(data, time_range, end_date)
+                filtered = {tf: harmonized[tf] for tf in required_timeframes if tf in harmonized}
+            elif time_range is not None:
+                filtered = _apply_time_range_filter(data, time_range, end_date)
+                filtered = {tf: filtered[tf] for tf in required_timeframes if tf in filtered}
+            else:
+                filtered = {tf: data[tf] for tf in required_timeframes if tf in data}
+
+            if not filtered:
+                raise ValueError(f"No data loaded for required timeframes: {required_timeframes}")
+
+            # Re-key filtered dict with case-insensitive resolution to respect requested order
+            # This ensures downstream modules can safely pick by order and insensitive name.
+            requested_primary = strategy.get_parameter('primary_timeframe', required_timeframes[0] if required_timeframes else None)
+            # Ensure primary is present; if not, promote the first available
+            chosen_primary = _select_timeframe(filtered, requested_primary)
+            # Move chosen_primary to front while preserving order for others
+            ordered_keys = [k for k in filtered.keys() if k == chosen_primary] + [k for k in filtered.keys() if k != chosen_primary]
+            filtered = {k: filtered[k] for k in ordered_keys}
+
+            all_symbols_data[symbol] = filtered
+
+            print(f"🔍 DEBUG: Loaded {symbol} with timeframes: {list(filtered.keys())}")
+            for timeframe, df in filtered.items():
+                if not df.empty:
+                    print(f"   {timeframe}: {len(df)} bars, range: {df.index.min()} to {df.index.max()}")
+
         except Exception as e:
             print(f"⚠️ Failed to load data for {symbol}: {e}")
-    
+
     return all_symbols_data
 
 def _load_symbol_data(file_paths: List[str], required_timeframes: List[str], 
@@ -206,42 +252,41 @@ def _load_symbol_data(file_paths: List[str], required_timeframes: List[str],
 
     # Load data for required timeframes
     for tf in required_timeframes:
-        tf_normalized = tf.lower() if not tf.endswith('D') else tf
-        
-        if tf_normalized in available_files:
+        # Normalize timeframe key forms to accept '1h' and '1H' equivalently
+        candidates = {tf}
+        tfl = tf.lower()
+        tfu = tf.upper()
+        candidates.update({tfl, tfu})
+        # Common alternates
+        if tfl.endswith('h'):
+            candidates.update({tfl, tfu})
+        if tfl.endswith('m'):
+            candidates.update({tfl, tfu})
+        if tfl in ('1d', 'd1'):
+            candidates.update({'1d', '1D', 'D1'})
+
+        chosen_path = None
+        for key in candidates:
+            if key in available_files:
+                chosen_path = available_files[key]
+                break
+
+        if chosen_path is None:
+            # As a last resort, try any key that equal ignoring case
+            for key in available_files.keys():
+                if key.lower() == tfl:
+                    chosen_path = available_files[key]
+                    break
+
+        if chosen_path is not None:
             try:
-                all_dataframes[tf] = load_ohlc_csv(available_files[tf_normalized])
-                print(f"✅ Loaded {tf} data from {available_files[tf_normalized]} ({len(all_dataframes[tf])} bars)")
+                all_dataframes[tf] = load_ohlc_csv(chosen_path)
+                print(f"✅ Loaded {tf} data from {chosen_path} ({len(all_dataframes[tf])} bars)")
             except Exception as e:
-                print(f"⚠️ Failed to load {tf} data from {available_files[tf_normalized]}: {e}")
+                print(f"⚠️ Failed to load {tf} data from {chosen_path}: {e}")
         else:
-            # Try alternative mappings
-            alt_mappings = {
-                '1h': ['1h', '1H'],
-                '4h': ['4h', '4H'], 
-                '1D': ['1D', '1d'],
-                '15m': ['15m', '15M'],
-                '30m': ['30m', '30M'],
-                # Legacy format mappings
-                '15min': ['15m', '15M'],
-                '30min': ['30m', '30M']
-            }
-            
-            found = False
-            if tf in alt_mappings:
-                for alt_tf in alt_mappings[tf]:
-                    if alt_tf in available_files:
-                        try:
-                            all_dataframes[tf] = load_ohlc_csv(available_files[alt_tf])
-                            print(f"✅ Loaded {tf} data from {available_files[alt_tf]} ({len(all_dataframes[tf])} bars)")
-                            found = True
-                            break
-                        except Exception as e:
-                            print(f"⚠️ Failed to load {tf} data from {available_files[alt_tf]}: {e}")
-            
-            if not found:
-                print(f"⚠️ No data file found for timeframe {tf}")
-                print(f"   Available timeframes: {list(available_files.keys())}")
+            print(f"⚠️ No data file found for timeframe {tf}")
+            print(f"   Available timeframes: {list(available_files.keys())}")
     
     if not all_dataframes:
         print(f"🔍 DEBUG: Available files: {available_files}")
