@@ -124,7 +124,6 @@ def _select_timeframe(available: Dict[str, pd.DataFrame], requested: Optional[st
                 return k
     return keys[0]
 
-
 def load_data_for_strategy(strategy, time_range: Optional[str] = None,
                           end_date: Optional[Union[str, datetime]] = None) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Load data and return a dict: symbol -> timeframe -> DataFrame.
@@ -215,111 +214,15 @@ def load_data_for_strategy(strategy, time_range: Optional[str] = None,
         except Exception as e:
             print(f"⚠️ Failed to load data for {symbol}: {e}")
 
+    # If multiple symbols, harmonize across symbols on the primary timeframe
+    try:
+        if len(all_symbols_data) > 1:
+            print("📅 Harmonizing time ranges across symbols (primary timeframe)...")
+            all_symbols_data = _harmonize_across_symbols(all_symbols_data, time_range, end_date)
+    except Exception as e:
+        print(f"⚠️ Cross-symbol harmonization failed: {e}")
+
     return all_symbols_data
-
-def _load_symbol_data(file_paths: List[str], required_timeframes: List[str], 
-                     time_range: Optional[str] = None, 
-                     end_date: Optional[Union[str, datetime]] = None) -> Dict[str, pd.DataFrame]:
-    """Load symbol data for specified timeframes from a list of files with time range harmonization."""
-    data = {}
-    all_dataframes = {}
-    
-    # Create mapping from timeframe to file path
-    available_files = {}
-    for path in file_paths:
-        # Extract timeframe from filename with various patterns
-        filename = os.path.basename(path)
-        parts = filename.split('_')
-        
-        if len(parts) >= 2:
-            # Handle patterns like "EURUSD_1H_2009-2025.csv" or "EURUSD_15m.csv"
-            tf_part = parts[1].split('-')[0].split('.')[0]  # Remove both date range and extension
-            
-            # Normalize timeframe names
-            tf_lower = tf_part.lower()
-            
-            # Store both original and normalized versions
-            available_files[tf_part] = path  # Original case
-            available_files[tf_lower] = path  # Lowercase
-            
-            # Also add common mappings
-            if tf_lower.endswith('h'):
-                available_files[tf_lower] = path  # 1h, 4h
-            elif tf_lower.endswith('m'):
-                available_files[tf_lower] = path  # 15m, 30m
-            elif tf_lower.endswith('d'):
-                available_files['1D'] = path  # Normalize daily to 1D
-
-    # Load data for required timeframes
-    for tf in required_timeframes:
-        # Normalize timeframe key forms to accept '1h' and '1H' equivalently
-        candidates = {tf}
-        tfl = tf.lower()
-        tfu = tf.upper()
-        candidates.update({tfl, tfu})
-        # Common alternates
-        if tfl.endswith('h'):
-            candidates.update({tfl, tfu})
-        if tfl.endswith('m'):
-            candidates.update({tfl, tfu})
-        if tfl in ('1d', 'd1'):
-            candidates.update({'1d', '1D', 'D1'})
-
-        chosen_path = None
-        for key in candidates:
-            if key in available_files:
-                chosen_path = available_files[key]
-                break
-
-        if chosen_path is None:
-            # As a last resort, try any key that equal ignoring case
-            for key in available_files.keys():
-                if key.lower() == tfl:
-                    chosen_path = available_files[key]
-                    break
-
-        if chosen_path is not None:
-            try:
-                all_dataframes[tf] = load_ohlc_csv(chosen_path)
-                print(f"✅ Loaded {tf} data from {chosen_path} ({len(all_dataframes[tf])} bars)")
-            except Exception as e:
-                print(f"⚠️ Failed to load {tf} data from {chosen_path}: {e}")
-        else:
-            print(f"⚠️ No data file found for timeframe {tf}")
-            print(f"   Available timeframes: {list(available_files.keys())}")
-    
-    if not all_dataframes:
-        print(f"🔍 DEBUG: Available files: {available_files}")
-        print(f"🔍 DEBUG: Required timeframes: {required_timeframes}")
-        raise ValueError(f"No data loaded for any required timeframes: {required_timeframes}")
-    
-    print(f"🔍 DEBUG: Loaded timeframes: {list(all_dataframes.keys())}")
-    
-    # Apply time range filtering if needed
-    if len(all_dataframes) > 1:
-        print("📅 Harmonizing time ranges across multiple timeframes...")
-        harmonized_data = _harmonize_time_ranges(all_dataframes, time_range, end_date)
-        
-        # Filter to only return required timeframes
-        for tf in required_timeframes:
-            if tf in harmonized_data:
-                data[tf] = harmonized_data[tf]
-    elif time_range is not None:
-        # Use optimized single timeframe filtering
-        filtered_data = _apply_time_range_filter(all_dataframes, time_range, end_date)
-        
-        # Filter to only return required timeframes
-        for tf in required_timeframes:
-            if tf in filtered_data:
-                data[tf] = filtered_data[tf]
-    else:
-        # Single timeframe, no time filtering needed - just return the data as-is
-        for tf in required_timeframes:
-            if tf in all_dataframes:
-                data[tf] = all_dataframes[tf]
-    
-    return data
-
 
 def _parse_time_range(time_range: str) -> timedelta:
     """Parse time range string into timedelta object.
@@ -546,3 +449,97 @@ def _harmonize_time_ranges(dataframes: Dict[str, pd.DataFrame],
     print(f"🔍 DEBUG: Harmonization complete. Returning {len(harmonized)} timeframe(s): {list(harmonized.keys())}")
     
     return harmonized
+
+def _harmonize_across_symbols(all_symbols_data: Dict[str, Dict[str, pd.DataFrame]],
+                              time_range: Optional[str] = None,
+                              end_date: Optional[Union[str, datetime]] = None
+                              ) -> Dict[str, Dict[str, pd.DataFrame]]:
+    """Harmonize the time range across multiple symbols using their primary timeframe and align on a common 1H grid."""
+    if not all_symbols_data:
+        return all_symbols_data
+
+    # Collect primary timeframe ranges and infer common frequency (default 1H)
+    primary_info = []
+    for symbol, tf_map in all_symbols_data.items():
+        if not tf_map:
+            continue
+        primary_tf = next(iter(tf_map.keys()))
+        df = tf_map.get(primary_tf)
+        if df is None or df.empty:
+            continue
+        if not isinstance(df.index, pd.DatetimeIndex):
+            try:
+                df.index = pd.to_datetime(df.index, errors='coerce')
+                df = df[df.index.notna()]
+                all_symbols_data[symbol][primary_tf] = df
+            except Exception:
+                continue
+        primary_info.append((symbol, primary_tf, df.index.min(), df.index.max(), df.index.inferred_freq))
+
+    if not primary_info:
+        return all_symbols_data
+
+    # Compute common overlapping window across symbols
+    common_start = max(info[2] for info in primary_info)
+    common_end_candidates = [info[3] for info in primary_info]
+    common_end = min(common_end_candidates)
+
+    # Apply time_range constraint inside overlap if given
+    if time_range:
+        td = _parse_time_range(time_range)
+        if td:
+            if end_date is None:
+                actual_end = common_end
+            else:
+                try:
+                    actual_end = pd.to_datetime(end_date) if isinstance(end_date, str) else end_date
+                except Exception:
+                    actual_end = common_end
+                actual_end = min(actual_end, common_end)
+            actual_start = max(common_start, actual_end - td)
+        else:
+            actual_start, actual_end = common_start, common_end
+    else:
+        actual_start, actual_end = common_start, common_end
+
+    # Align end timestamp exactly to the minimum per-symbol end to avoid trailing mismatches
+    print(f"📅 Cross-symbol unified range: {actual_start} to {actual_end}")
+
+    # Build a common 1H index grid over the unified window
+    # Use 1H explicitly; strategies shown use '1H' as primary
+    try:
+        grid = pd.date_range(start=actual_start, end=actual_end, freq='1H')
+    except Exception:
+        # Fallback: infer from first symbol if date_range fails
+        grid = None
+        for _, tf_map in all_symbols_data.items():
+            first_df = next(iter(tf_map.values()))
+            grid = first_df.index
+            break
+
+    trimmed: Dict[str, Dict[str, pd.DataFrame]] = {}
+    for symbol, tf_map in all_symbols_data.items():
+        out_map: Dict[str, pd.DataFrame] = {}
+        for tf, df in tf_map.items():
+            if df is None or df.empty:
+                continue
+            sub = df.loc[(df.index >= actual_start) & (df.index <= actual_end)]
+            if sub.empty:
+                continue
+            # Reindex to common 1H grid if feasible
+            if grid is not None and isinstance(sub.index, pd.DatetimeIndex):
+                # If not exactly on the grid, reindex with forward-fill to maintain bar count
+                reindexed = sub.reindex(grid, method='pad').dropna()
+                # Keep only columns the strategy expects
+                out_map[tf] = reindexed
+            else:
+                out_map[tf] = sub
+        if out_map:
+            trimmed[symbol] = out_map
+
+    # Log final ranges
+    for symbol, tf_map in trimmed.items():
+        for tf, df in tf_map.items():
+            print(f"   {symbol} {tf}: {len(df)} bars, range: {df.index.min()} to {df.index.max()}")
+
+    return trimmed

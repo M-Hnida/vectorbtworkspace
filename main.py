@@ -12,7 +12,10 @@ import pandas as pd
 from backtest import run_backtest, get_available_strategies
 from data_manager import load_data_for_strategy, load_strategy_config
 from base import StrategyConfig
-from strategies import get_strategy_signal_function, get_required_timeframes, get_required_columns
+from strategies import get_required_timeframes, get_required_columns
+from plotter import create_visualizations
+from walk_forward import run_walkforward_analysis
+from optimizer import run_optimization,run_monte_carlo_analysis
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -23,43 +26,40 @@ warnings.filterwarnings("ignore")
 
 def get_primary_data(data: Dict[str, Dict[str, pd.DataFrame]],
                     strategy_config: StrategyConfig) -> tuple:
-    """Get primary symbol and timeframe data for analysis (order-based, case-insensitive)."""
+    """Get primary symbol/timeframe data, case-insensitive with order fallback."""
     if not data:
         raise ValueError("No data provided")
 
     params = strategy_config.parameters or {}
+
     # Select primary symbol by parameter or first key if not found (case-insensitive)
-    primary_symbol = params.get('primary_symbol', None)
-    if primary_symbol is not None:
+    primary_symbol = params.get('primary_symbol')
+    if primary_symbol:
         sym_map = {k.lower(): k for k in data.keys()}
-        primary_symbol = sym_map.get(primary_symbol.lower(), primary_symbol)
+        primary_symbol = sym_map.get(str(primary_symbol).lower(), primary_symbol)
     if primary_symbol not in data:
-        primary_symbol = list(data.keys())[0]
+        primary_symbol = next(iter(data.keys()))
 
     # Select timeframe by case-insensitive match, fallback to first available
     available_tfs = data[primary_symbol]
     requested_tf = params.get('primary_timeframe')
-    keys = list(available_tfs.keys())
-    chosen_tf = None
     if requested_tf:
-        req = requested_tf.lower()
-        for k in keys:
-            if k.lower() == req:
-                chosen_tf = k
-                break
-    if chosen_tf is None:
-        chosen_tf = keys[0]
+        tf_map = {k.lower(): k for k in available_tfs.keys()}
+        chosen_tf = tf_map.get(str(requested_tf).lower(), next(iter(available_tfs.keys())))
+    else:
+        chosen_tf = next(iter(available_tfs.keys()))
 
     primary_data = available_tfs[chosen_tf]
-    # Update parameters to reflect the chosen timeframe for downstream consistency
+    # Persist chosen primary timeframe for downstream consistency
     strategy_config.parameters['primary_timeframe'] = chosen_tf
     return primary_symbol, chosen_tf, primary_data
 
 
 def generate_signals_for_strategy(strategy_name: str, parameters: dict, tf_data: Dict[str, pd.DataFrame]):
     """Generate signals using strategy function."""
-    signal_func = get_strategy_signal_function(strategy_name)
-    return signal_func(tf_data, parameters)
+    # Use canonical registry accessor; alias kept in strategies for compatibility
+    from strategies import get_strategy_function
+    return get_strategy_function(strategy_name)(tf_data, parameters)
 
 
 def run_single_backtest(symbol: str, timeframe: str, timeframes: Dict[str, pd.DataFrame],
@@ -80,7 +80,9 @@ def run_single_backtest(symbol: str, timeframe: str, timeframes: Dict[str, pd.Da
 
         # Get portfolio params via unified hook
         from strategies import get_portfolio_params
-        vbt_params = get_portfolio_params(strategy_name, primary_data, parameters)
+        vbt_params = get_portfolio_params(strategy_name, primary_data, parameters) or {}
+        if not isinstance(vbt_params, dict):
+            vbt_params = {}
 
         # Run backtest
         portfolio = run_backtest(primary_data, signals, vbt_params=vbt_params)
@@ -109,24 +111,18 @@ def run_full_backtest(data: Dict[str, Dict[str, pd.DataFrame]],
         
         if len(required_tfs) > 1:
             # Multi-timeframe strategy
-            requested_primary = parameters.get('primary_timeframe', required_tfs[0] if required_tfs else None)
-            keys = list(timeframes.keys())
-            chosen_tf = None
-            if requested_primary:
-                req = requested_primary.lower()
-                for k in keys:
-                    if k.lower() == req:
-                        chosen_tf = k
-                        break
-            if chosen_tf is None and keys:
-                chosen_tf = keys[0]
+            req = parameters.get('primary_timeframe', required_tfs[0] if required_tfs else None)
+            if req:
+                tf_map = {k.lower(): k for k in timeframes.keys()}
+                chosen_tf = tf_map.get(str(req).lower(), next(iter(timeframes.keys())))
+            else:
+                chosen_tf = next(iter(timeframes.keys()))
 
-            if chosen_tf in timeframes:
-                portfolio = run_single_backtest(
-                    symbol, chosen_tf, timeframes, strategy_name, parameters, required_tfs, is_multi_tf=True
-                )
-                if portfolio:
-                    results[symbol][chosen_tf] = portfolio
+            portfolio = run_single_backtest(
+                symbol, chosen_tf, timeframes, strategy_name, parameters, required_tfs, is_multi_tf=True
+            )
+            if portfolio:
+                results[symbol][chosen_tf] = portfolio
         else:
             # Single timeframe strategy - run on all available timeframes
             for timeframe in timeframes.keys():
@@ -149,7 +145,7 @@ def flatten_portfolios(portfolio_results: Dict[str, Dict[str, Any]]) -> Dict[str
     return flattened
 
 
-def run_fast_analysis(strategy_name: str, strategy_config: StrategyConfig, data: Dict) -> Dict[str, Any]:
+def run_fast_analysis(strategy_name: str, strategy_config: StrategyConfig, data: Dict):
     """Run fast analysis - just backtest and basic plots."""
     print("\n🚀 Running Strategy (Default Parameters)")
     portfolio_results = run_full_backtest(data, strategy_name, strategy_config.parameters)
@@ -157,14 +153,8 @@ def run_fast_analysis(strategy_name: str, strategy_config: StrategyConfig, data:
     print("\n📊 Generating Portfolio Plots")
     from plotter import plot_comprehensive_analysis
     flattened_portfolios = flatten_portfolios(portfolio_results)
-    # No Monte Carlo in fast mode; explicitly set show to optimized
-    visualization_results = plot_comprehensive_analysis(flattened_portfolios, strategy_config.name, mc_results=None, wf_results=None, show="optimized")
+    plot_comprehensive_analysis(flattened_portfolios, strategy_config.name)
     
-    return {
-        'portfolios': portfolio_results,
-        'visualizations': visualization_results
-    }
-
 
 def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig, 
                      data: Dict, primary_data: pd.DataFrame) -> Dict[str, Any]:
@@ -178,7 +168,6 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
     
     # Step 2: Parameter optimization
     print("\n🔧 STEP 2: Parameter Optimization")
-    from optimizer import run_optimization
     
     # Create a simple strategy context for optimizer
     class OptimizerStrategyContext:
@@ -188,7 +177,8 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
             """Initialize optimizer strategy context."""
             self.name = strategy_name
             self.parameters = strategy_config.parameters.copy()
-            self.signal_func = get_strategy_signal_function(strategy_name)
+            from strategies import get_strategy_function
+            self.signal_func = get_strategy_function(strategy_name)
         
         def get_required_timeframes(self):
             """Get required timeframes for the strategy."""
@@ -213,7 +203,6 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
     
     # Step 4: Robustness tests
     print("\n📈 STEP 4: Walk-Forward Analysis (Robustness)")
-    from walk_forward import run_walkforward_analysis
     
     class OptimizedStrategyContext:
         """Strategy context for optimized parameters."""
@@ -222,7 +211,8 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
             """Initialize optimized strategy context."""
             self.name = strategy_name
             self.parameters = optimized_params
-            self.signal_func = get_strategy_signal_function(strategy_name)
+            from strategies import get_strategy_function
+            self.signal_func = get_strategy_function(strategy_name)
         
         def get_required_timeframes(self):
             """Get required timeframes for the strategy."""
@@ -234,7 +224,6 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
     results['walkforward'] = walkforward_results
     
     print("\n🎲 STEP 5: Monte Carlo Analysis (Overfitting Test)")
-    from optimizer import run_monte_carlo_analysis
     monte_carlo_results = run_monte_carlo_analysis(primary_data, optimized_context)
     results['monte_carlo'] = monte_carlo_results
     
@@ -248,7 +237,6 @@ def run_full_analysis(strategy_name: str, strategy_config: StrategyConfig,
         'optimization': optimization_results
     }
     
-    from plotter import create_visualizations
     # Prefer showing Monte Carlo by default when available
     visualization_results = create_visualizations(visualization_data, strategy_config.name)
     results['visualizations'] = visualization_results
@@ -289,11 +277,13 @@ def run_strategy_analysis(strategy_name: str, fast_mode: bool = False,
 
         strategy_context = StrategyContext()
         data = load_data_for_strategy(strategy_context, time_range, end_date)
-        _, _, primary_data = get_primary_data(data, strategy_config)
+        # get_primary_data returns a tuple; bind explicitly to avoid linter confusion
+        _sym, _tf, primary_data = get_primary_data(data, strategy_config)
 
         if fast_mode:
             results = run_fast_analysis(strategy_name, strategy_config, data)
         else:
+            _ = run_full_analysis  # hint for linter about function usage
             results = run_full_analysis(strategy_name, strategy_config, data, primary_data)
 
         return {"success": True, "results": results}

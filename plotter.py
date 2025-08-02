@@ -6,6 +6,9 @@ Handles all plotting and visualization for trading strategy analysis.
 import warnings
 warnings.filterwarnings("ignore")
 
+# Toggle verbose diagnostics across this module
+DEBUG = False
+
 from typing import Dict, Any, Optional
 import numpy as np
 import pandas as pd
@@ -16,538 +19,504 @@ import vectorbt as vbt
 # Configure VectorBT global settings for consistent plotting
 vbt.settings.set_theme("dark")
 vbt.settings['plotting']['layout']["template"] = "plotly_dark"
-# Don't set height/width to None - this causes addition error when redefined later
-# vbt.settings['plotting']['layout']['height'] = None
-# vbt.settings['plotting']['layout']['width'] = None
-
-
-def create_performance_plots(portfolios: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
-    """Create performance plots for multiple portfolios."""
-    return plot_comprehensive_analysis(portfolios, strategy_name)
 
 
 def plot_comprehensive_analysis(portfolios, strategy_name: str = "Trading Strategy",
                                 mc_results: Optional[Dict[str, Any]] = None,
-                                wf_results: Optional[Dict[str, Any]] = None,
-                                show: str = "auto") -> Dict[str, Any]:
-    """Plot everything: portfolios, Monte Carlo, and walk-forward analysis.
+                                wf_results: Optional[Dict[str, Any]] = None):
+    """Plot everything: portfolios, Monte Carlo, and walk-forward analysis."""
+    if not portfolios:
+        print("No portfolios to plot")
+        return
+
+    _plot_portfolios(portfolios, strategy_name)
     
-    Args:
-        portfolios: dict of name -> vbt.Portfolio
-        mc_results: results from optimizer.run_monte_carlo_analysis
-        wf_results: walk-forward results
-        show: "auto" | "monte_carlo" | "optimized". If "auto", defaults to Monte Carlo if available.
-    """
-    try:
-        if not portfolios:
-            print("Warning: No portfolios provided")
-            return {"success": False, "error": "No portfolios provided"}
+    if mc_results:
+        _plot_monte_carlo(mc_results)
+        
+    if wf_results:
+        _plot_walkforward(wf_results)
 
-        if not isinstance(portfolios, dict):
-            portfolios = {"Portfolio": portfolios}
-
-        # Decide default view
-        has_mc = bool(mc_results) and ('error' not in mc_results)
-        if show == "auto":
-            show = "monte_carlo" if has_mc else "optimized"
-
-        # Always render portfolios first for consistency
-        _plot_portfolios(portfolios, strategy_name)
-
-        # MC visualization first if requested/available
-        if has_mc:
-            print("Plotting Monte Carlo analysis...")
-            _plot_monte_carlo(mc_results, preferred_view=show)
-
-        if wf_results and 'error' not in wf_results:
-            print("Plotting walk-forward analysis...")
-            _plot_walkforward(wf_results)
-
-        print("Comprehensive analysis completed.")
-        return {"success": True}
-
-    except Exception as e:
-        print(f"Comprehensive analysis failed: {e}")
-        return {"success": False, "error": str(e)}
-
-def _plot_portfolios(portfolios: Dict[str, Any], strategy_name: str) -> None:
+def _plot_portfolios(portfolios: Dict[str, Any], strategy_name: str):
     """Plot individual portfolios and comparison using VectorBT native functionality."""
     print("Creating portfolio visualizations...")
 
     # Plot each portfolio individually
-    for name, portfolio in portfolios.items():
-        if not _validate_portfolio(portfolio, name):
-            continue
-            
-        try:
-            _plot_single_portfolio(portfolio, name, strategy_name)
-        except Exception as e:
-            print(f"Failed to plot {name}: {e}")
-            continue
+    # Ensure default portfolios are shown first
+    ordered = sorted(portfolios.items(), key=lambda kv: (not kv[0].endswith('_default'), kv[0]))
+    for name, portfolio in ordered:
+        _plot_single_portfolio(portfolio, name, strategy_name)
 
     # Create comparison plot if multiple portfolios
     if len(portfolios) > 1:
-        _create_vectorbt_comparison(portfolios, strategy_name)
+        _create_comparison_plot(portfolios, strategy_name)
 
-
-def _validate_portfolio(portfolio: Any, name: str) -> bool:
-    """Validate portfolio before plotting."""
-    if portfolio is None:
-        print(f"Skipping {name}: portfolio is None")
-        return False
-        
-    try:
-        stats = portfolio.stats()
-        if stats is None or len(stats) == 0 or not stats.get('Total Trades', 0):
-            print(f"Skipping {name}: no trades")
-            return False
-
-        value_series = portfolio.value()
-        if value_series is None or len(value_series) == 0 or value_series.isna().all():
-            print(f"Skipping {name}: no valid value data")
-            return False
-
-        # Make orders validation tolerant - feature-detect via hasattr
-        if hasattr(portfolio, 'orders') and portfolio.orders is None:
-            print(f"Warning: Portfolio orders is None for {name}, but proceeding with valid stats and value")
-            # Don't return False - allow plotting if stats and value are valid
-
-        return True
-        
-    except Exception as e:
-        print(f"Portfolio validation failed for {name}: {e}")
-        return False
-
-
-def _plot_single_portfolio(portfolio: Any, name: str, strategy_name: str) -> None:
+def _plot_single_portfolio(portfolio: Any, name: str, strategy_name: str):
     """Plot a single portfolio."""
-    print(f"Creating VectorBT plot for {name}...")
-    print(f"Portfolio validation passed for {name}")
+    print(f"Creating plot for {name}...")
     
-    try:
-        fig = portfolio.plot(template='plotly_dark')
-        fig.update_layout(
-            title=f"{strategy_name} Strategy - {name} Performance",
-            height=600,
-            width=1200
-        )
-        fig.show()
-        
-    except Exception as plot_error:
-        print(f"VectorBT plot failed for {name}: {plot_error}")
-        print(f"   Portfolio type: {type(portfolio)}")
-        print(f"   Portfolio stats available: {hasattr(portfolio, 'stats')}")
-        
-def _create_vectorbt_comparison(portfolios: Dict[str, Any], strategy_name: str):
-    """Create VectorBT native comparison plot for multiple portfolios."""
-    try:
-        print("Creating portfolio comparison...")
-        if len(portfolios) <= 1:
-            return
+    fig = portfolio.plot(template='plotly_dark')
+    fig.update_layout(
+        title=f"{strategy_name} - {name}",
+        height=None,
+        width=None
+    )
+    fig.show()
 
-        fig = go.Figure()
-        
-        for name, portfolio in portfolios.items():
-            try:
-                if portfolio is None:
-                    continue
-
-                value_series = portfolio.value()
-                if value_series is None or len(value_series) == 0:
-                    continue
-
-                first_value = value_series.iloc[0]
-                if pd.isna(first_value) or first_value == 0:
-                    continue
-                    
-                normalized_values = (value_series / first_value) * 100
-                fig.add_trace(go.Scatter(
-                    x=normalized_values.index, y=normalized_values.values,
-                    mode='lines', name=name, line={"width": 3}
-                ))
-            except Exception as e:
-                print(f"Failed to add {name} to comparison: {e}")
-
-        fig.update_layout(
-            title=f"{strategy_name} Strategy - Portfolio Comparison (Normalized)",
-            yaxis_title="Normalized Value (Start = 100)", xaxis_title="Date",
-            template='plotly_dark', height=600, width=1200
-        )
-        fig.show()
+def _create_comparison_plot(portfolios: Dict[str, Any], strategy_name: str):
+    """Create comparison plot for multiple portfolios."""
+    print("Creating portfolio comparison...")
     
+    fig = go.Figure()
+    
+    # Ensure default series are added first for legend consistency
+    ordered = sorted(portfolios.items(), key=lambda kv: (not kv[0].endswith('_default'), kv[0]))
+    for name, portfolio in ordered:
+        value_series = portfolio.value()
+        normalized_values = (value_series / value_series.iloc[0]) * 100
+        
+        fig.add_trace(go.Scatter(
+            x=normalized_values.index, 
+            y=normalized_values.values,
+            mode='lines', 
+            name=name, 
+            line={"width": 3}
+        ))
 
-    except Exception as e:
-        print(f"VectorBT comparison plot failed: {e}")
+    fig.update_layout(
+        title=f"{strategy_name} - Portfolio Comparison",
+        yaxis_title="Normalized Value (Start = 100)", 
+        xaxis_title="Date",
+        template='plotly_dark'
+    )
+    fig.show()
 
-def _plot_monte_carlo(mc_results: Dict[str, Any], preferred_view: str = "monte_carlo") -> Dict[str, Any]:
-    """Plot Monte Carlo results with parameter sensitivity analysis and path-matrix support."""
+def _plot_monte_carlo(mc_results: Dict[str, Any]):
+    """Plot Monte Carlo results with parameter sensitivity analysis and path visualization."""
+    simulations = mc_results.get('simulations', [])
+    statistics = mc_results.get('statistics', {})
+    
+    if not simulations:
+        print("No Monte Carlo simulations to plot"); return
+
+    if DEBUG:
+        print(f"Plotting {len(simulations)} Monte Carlo simulations...")
+
+    # Extract returns data
+    returns_data = [sim['total_return'] for sim in simulations if 'total_return' in sim]
+    
+    if not returns_data:
+        print("No valid returns data found"); return
+
+    # Create subplots
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=[
+            'Return Distribution',
+            'Parameter Sensitivity', 
+            'Simulation Paths',
+            'Performance Comparison'
+        ]
+    )
+
+    # Add histogram
+    _add_histogram(fig, returns_data, statistics)
+    
+    # Add parameter sensitivity
+    _add_parameter_sensitivity(fig, simulations)
+    
+    # Add simulation paths
+    _add_simulation_paths(fig, simulations, mc_results)
+    
+    # Add performance comparison
+    _add_mc_comparison(fig, statistics)
+
+    fig.update_layout(
+        title="Monte Carlo Analysis",
+        template='plotly_dark'
+    )
+    
+    fig.show()
+    _print_mc_summary(statistics)
+
+def _add_simulation_paths(fig: go.Figure, simulations: list, mc_results: Optional[Dict[str, Any]] = None) -> None:
+    """Add simulation paths panel using path_matrix when available, else fallback to per-sim equity curves."""
     try:
-        simulations = mc_results.get('simulations', [])
-        statistics = mc_results.get('statistics', {})
-        path_matrix = mc_results.get('path_matrix', None)
-
-        # Robustly extract numeric returns_data for histogram
-        returns_data = []
-        for sim in simulations:
-            r = sim.get('total_return')
-            if r is None:
-                continue
+        path_matrix = None
+        if isinstance(mc_results, dict):
+            # Preferred: use precomputed path_matrix for efficient plotting
+            path_matrix = mc_results.get('path_matrix', None)
+            # Also set reference for percentile helper if used later
             try:
-                r = float(r)
+                setattr(_add_mc_percentiles, "_path_matrix_ref", path_matrix)
             except Exception:
-                continue
-            if np.isfinite(r):
-                returns_data.append(r)
+                pass
 
-        # Ensure numpy array for path_matrix
+        # Try path_matrix first
+        used = False
         if path_matrix is not None:
-            try:
-                path_matrix = np.asarray(path_matrix, dtype=float)
-            except Exception:
-                path_matrix = None
+            used = _plot_from_path_matrix(fig, path_matrix)
 
-        if (not simulations or len(returns_data) == 0) and (path_matrix is None or path_matrix.size == 0):
-            print("Error: No simulations or path matrix available for Monte Carlo plot")
-            return {"success": False, "reason": "no_simulations"}
-
-        # Create figure
-        fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=[
-                'Monte Carlo Return Distribution',
-                'Parameter Sensitivity Analysis',
-                'Monte Carlo Simulation Paths',
-                'Performance vs Random'
-            ],
-            specs=[[{"secondary_y": False}, {"secondary_y": False}],
-                   [{"secondary_y": False}, {"secondary_y": False}]]
-        )
-
-        # Add histogram and parameter sensitivity
-        _add_mc_histogram(fig, returns_data, statistics)
-        _add_parameter_sensitivity(fig, simulations)
-
-        # Inject path_matrix for downstream function (avoids copying)
-        setattr(_add_mc_percentiles, "_path_matrix_ref", path_matrix)
-
-        # Add path view using path_matrix when available; fallback to sampled equity_curve traces
-        _add_mc_percentiles(fig, returns_data, statistics)
-
-        # Comparison panel (auto-scale y dynamically from data)
-        _add_mc_comparison(fig, statistics)
-
-        # Layout
-        fig.update_layout(
-            title="Monte Carlo Analysis - Parameter Sensitivity",
-            template='plotly_dark',
-            height=800,
-            width=1200,
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-        _update_mc_axes(fig)
-        fig.show()
-
-        _print_mc_summary(statistics)
-        return {"success": True}
-
+        # Fallback to individual simulation equity curves when available
+        if not used and simulations:
+            _plot_from_individual_simulations(fig, simulations)
     except Exception as e:
-        print(f"Monte Carlo plot failed: {e}")
-        return {"success": False, "error": str(e)}
+        if DEBUG:
+            print(f"Debug: _add_simulation_paths failed: {e}")
 
-
-def _add_mc_histogram(fig: go.Figure, returns_data: list, statistics: dict) -> None:
-    """Add robust histogram for MC returns with NaN/Inf guards."""
-    # Accept both list and np array
-    try:
-        arr = np.asarray(returns_data, dtype=float)
-    except Exception:
-        return
-    arr = arr[np.isfinite(arr)]
-    if arr.size == 0:
-        print("Error: No finite returns for histogram")
-        return
-
-    # Use FD rule, fallback to sqrt; ensure at least 5 bins
-    try:
-        q75, q25 = np.percentile(arr, [75, 25])
-        iqr = q75 - q25
-        bin_width = 2 * iqr / np.cbrt(arr.size) if iqr > 0 else 0
-        if bin_width > 0:
-            n_bins = int(np.clip(np.ceil((arr.max() - arr.min()) / bin_width), 5, 100))
-        else:
-            n_bins = int(np.clip(np.sqrt(arr.size), 5, 50))
-    except Exception:
-        n_bins = int(np.clip(np.sqrt(arr.size), 5, 50))
-
+def _add_histogram(fig: go.Figure, returns_data: list, statistics: dict):
+    """Add histogram of Monte Carlo returns."""
     fig.add_trace(go.Histogram(
-        x=arr.tolist(),
-        nbinsx=int(n_bins),
-        name='Random Returns',
-        opacity=0.8,
-        marker_color='lightblue',
-        showlegend=True
+        x=returns_data,
+        nbinsx=30,
+        name='MC Returns',
+        marker_color='lightblue'
     ), row=1, col=1)
 
-    # Strategy marker
+    # Add strategy performance line
     actual_return = statistics.get('actual_return')
-    if actual_return is not None:
-        try:
-            ar = float(actual_return)
-        except Exception:
-            ar = None
-        if ar is not None and np.isfinite(ar):
-            hist_counts, _ = np.histogram(arr, bins=int(n_bins))
-            max_count = float(hist_counts.max()) if hist_counts.size > 0 else 1.0
-            fig.add_shape(
-                type="line", x0=ar, x1=ar, y0=0, y1=max_count,
-                line={"dash": "dash", "color": "red", "width": 3},
-                xref="x1", yref="y1"
-            )
-            fig.add_annotation(
-                x=ar, y=max_count * 0.9, text=f"Strategy: {ar:.2f}%",
-                showarrow=True, arrowcolor="red", xref="x1", yref="y1"
-            )
+    if actual_return:
+        fig.add_vline(
+            x=actual_return, 
+            line_dash="dash", 
+            line_color="red",
+            annotation_text=f"Strategy: {actual_return:.2f}%",
+            row=1, col=1
+        )
+
+def _extract_parameter_data(simulations: list) -> Optional[dict]:
+    """Extract parameter values and returns from simulations dynamically."""
+    if not simulations:
+        return None
+    
+    # Get all parameter names from first simulation
+    first_sim = next((s for s in simulations if isinstance(s, dict) and 'parameters' in s), None)
+    if not first_sim:
+        return None
+    
+    param_names = list(first_sim.get('parameters', {}).keys())
+    if not param_names:
+        return None
+    
+    # Initialize data structure
+    param_data = {name: [] for name in param_names}
+    param_data['returns'] = []
+    
+    # Extract data from all simulations
+    for sim in simulations:
+        if not isinstance(sim, dict) or 'total_return' not in sim:
+            continue
+            
+        parameters = sim.get('parameters', {})
+        if not parameters:
+            continue
+            
+        # Add parameter values
+        for name in param_names:
+            param_data[name].append(parameters.get(name, 0))
+        param_data['returns'].append(sim['total_return'])
+    
+    return param_data if param_data['returns'] else None
 
 
 def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
-    """Add parameter sensitivity analysis subplot."""
+    """Add parameter sensitivity panel with clearer, more interpretable summaries.
+    
+    Debug logging added to validate:
+      - Extracted parameter names and sample values
+      - Returns scale (percent vs fraction) and sign
+      - Binning labels used on x-axis to ensure they are strings, not numbers
+    """
     if not simulations:
         print("Warning: No simulations provided for parameter sensitivity analysis")
         return
 
-    # Extract parameter values and returns with better handling
-    param1_values = []
-    param2_values = []
-    returns = []
-    
-    # Try different parameter key names that might exist
-    possible_param_keys = [
-        ['param1', 'param2'], ['parameter1', 'parameter2'],
-        ['p1', 'p2'], ['params', None], ['parameters', None]
-    ]
-    
-    for sim in simulations:
-        # Try to find parameter values in simulation data
-        p1, p2 = None, None
+    # Extract
+    param_data = _extract_parameter_data(simulations)
+    if not param_data:
+        print("Warning: No valid parameter data found for sensitivity analysis")
+        return
+
+    param_names = [n for n in param_data.keys() if n != 'returns']
+    returns = pd.Series(param_data['returns'], dtype=float)
+    if len(param_names) == 0 or returns.empty:
+        print("Warning: No parameters found in simulation data")
+        return
+
+    # Diagnostic: show a compact snapshot
+    try:
+        sample_n = min(5, len(returns))
+        print("[Diag] Sensitivity: params =", param_names)
+        for name in param_names[:5]:
+            vals = pd.Series(param_data[name])
+            print(f"[Diag]   {name}: sample={list(vals.head(sample_n))}, unique_count={vals.nunique(dropna=True)}")
+        print(f"[Diag]   returns: sample={list(returns.head(sample_n))}, min={returns.min():.4f}, max={returns.max():.4f}")
+        # Heuristic scale check
+        if returns.abs().median() <= 1.0:
+            print("[Diag]   returns look like FRACTIONS; plotting assumes PERCENT. Upstream may need scaling x100.")
+        else:
+            print("[Diag]   returns look like PERCENT values.")
+    except Exception as e:
+        print(f"[Diag] Logging error in parameter sensitivity: {e}")
+
+    # 1) Feature importance style: absolute Spearman correlation per parameter (bar chart)
+    import numpy as _np
+    import pandas as _pd
+    try:
+        scores = []
+        for name in param_names:
+            vals = _pd.Series(param_data[name])
+            mask = ~(vals.isna() | returns.isna())
+            if mask.sum() >= 3:
+                corr = float(returns[mask].corr(vals[mask], method='spearman'))
+                scores.append((name, abs(corr)))
+        if scores:
+            scores.sort(key=lambda x: x[1], reverse=True)
+            names, vals = zip(*scores)
+            fig.add_trace(go.Bar(
+                x=[str(n) for n in list(names)],  # ensure categorical axis
+                y=list(vals),
+                marker_color='cornflowerblue',
+                name='Param Importance (|Spearman|)'
+            ), row=1, col=2)
+            fig.update_yaxes(title_text="|Spearman|", row=1, col=2)
+    except Exception as e:
+        print(f"[Diag] Error computing importance scores: {e}")
+
+    # 2) For top-1 parameter, show aggregated performance bands (violin) for interpretability
+    if scores:
+        top_param = scores[0][0]
+        top_vals = _pd.Series(param_data[top_param])
+        mask = ~(top_vals.isna() | returns.isna())
+        if mask.sum() >= 5:
+            # Bin numeric parameters into quantiles for readability
+            q = _pd.qcut(top_vals[mask], q=min(5, mask.sum()), duplicates='drop')
+            grouped = _pd.DataFrame({'bin': q.astype(str), 'ret': returns[mask].values})
+            # Sort bins by median for ordered storytelling
+            med = grouped.groupby('bin')['ret'].median().sort_values()
+            ordered_bins = list(med.index)
+            print(f"[Diag]   top_param={top_param}, bins={ordered_bins}")
+            for b in ordered_bins:
+                vals = grouped[grouped['bin'] == b]['ret'].values
+                if len(vals) == 0:
+                    continue
+                # Ensure x is string categorical so Plotly uses labels not numeric codes
+                label = f"{top_param} {b}"
+                fig.add_trace(go.Violin(
+                    y=vals,
+                    x=[label]*len(vals),
+                    name=label,
+                    line_color='lightblue',
+                    meanline_visible=True,
+                    showlegend=False
+                ), row=1, col=2)
+            fig.update_yaxes(title_text="Return (%)", row=1, col=2)
+
+    # 3) Keep existing 2D scatter only when exactly two varying params and low cardinality (clear heatmap alternative)
+    varying = [n for n in param_names if len(set([v for v in param_data[n] if v is not None])) > 1]
+    if len(varying) == 2:
+        x_param, y_param = varying
+        x_vals = _pd.Series(param_data[x_param])
+        y_vals = _pd.Series(param_data[y_param])
+        mask = ~(x_vals.isna() | y_vals.isna() | returns.isna())
+        if mask.sum() >= 4:
+            # Aggregate to a pivot heatmap for clarity
+            try:
+                df = _pd.DataFrame({
+                    'x': x_vals[mask].values,
+                    'y': y_vals[mask].values,
+                    'ret': returns[mask].values
+                })
+                # Reduce cardinality by bucketing if needed
+                def bucket(s):
+                    uniq = _np.unique(s)
+                    if len(uniq) > 12:
+                        # numeric bucketing
+                        return _pd.qcut(s, q=8, duplicates='drop').astype(str)
+                    return s.astype(str)
+                df['xb'] = bucket(_pd.Series(df['x']))
+                df['yb'] = bucket(_pd.Series(df['y']))
+                piv = df.groupby(['yb', 'xb'])['ret'].mean().reset_index()
+                piv_pivot = piv.pivot(index='yb', columns='xb', values='ret')
+                # Build heatmap
+                fig.add_trace(go.Heatmap(
+                    z=piv_pivot.values,
+                    x=[str(c) for c in list(piv_pivot.columns)],
+                    y=[str(i) for i in list(piv_pivot.index)],
+                    colorscale='RdYlGn',
+                    colorbar=dict(title="Mean Return (%)"),
+                    name='Param Heatmap',
+                    showscale=True
+                ), row=1, col=2)
+                fig.update_xaxes(title_text=str(x_param), row=1, col=2)
+                fig.update_yaxes(title_text=str(y_param), row=1, col=2)
+            except Exception as e:
+                print(f"[Diag] Error building 2D heatmap: {e}")
+
+def _plot_from_path_matrix(fig: go.Figure, path_matrix) -> bool:
+    """Plot simulation paths from path_matrix."""
+    try:
+        if DEBUG:
+            print("Debug: Attempting to use path_matrix")
+        arr = np.asarray(path_matrix, dtype=float)
         
-        for key_pair in possible_param_keys:
-            if key_pair[0] in sim:
-                if isinstance(sim[key_pair[0]], (list, tuple)) and len(sim[key_pair[0]]) >= 2:
-                    p1, p2 = sim[key_pair[0]][0], sim[key_pair[0]][1]
-                    break
-                elif key_pair[1] and key_pair[1] in sim:
-                    p1, p2 = sim[key_pair[0]], sim[key_pair[1]]
-                    break
-                elif isinstance(sim[key_pair[0]], (int, float)):
-                    p1 = sim[key_pair[0]]
-                    # Try to find second parameter
-                    if 'param2' in sim:
-                        p2 = sim['param2']
-                    elif len(simulations) > 1:
-                        # Use simulation index as second parameter if no param2
-                        p2 = simulations.index(sim)
-        
-        # If still no parameters found, use defaults
-        if p1 is None:
-            p1 = sim.get('param1', sim.get('parameter1', sim.get('p1', 0)))
-        if p2 is None:
-            p2 = sim.get('param2', sim.get('parameter2', sim.get('p2', 0)))
+        if arr.ndim == 2 and arr.size > 0:
+            T, N = arr.shape
+            if DEBUG:
+                print(f"Debug: path_matrix shape: {T} time steps, {N} simulations")
             
-        param1_values.append(p1)
-        param2_values.append(p2)
-        returns.append(sim['total_return'])
-    
-    # Debug: Print data characteristics
-    print(f"   Debug - Param1 values: {len(param1_values)} values, range: [{min(param1_values) if param1_values else 'N/A'}, {max(param1_values) if param1_values else 'N/A'}]")
-    print(f"   Debug - Param2 values: {len(param2_values)} values, range: [{min(param2_values) if param2_values else 'N/A'}, {max(param2_values) if param2_values else 'N/A'}]")
-    print(f"   Debug - Returns: {len(returns)} values, range: [{min(returns):.3f}%, {max(returns):.3f}%]" if returns else "   Debug - Returns: No data")
-
-    # Check if we have meaningful parameter variation
-    param1_unique = len(set(param1_values)) > 1
-    param2_unique = len(set(param2_values)) > 1
-    
-    if not param1_unique and not param2_unique:
-        print("Warning: No parameter variation detected - all simulations used same parameters, skipping parameter sensitivity subplot")
-        return
-
-    # Filter out invalid values (NaN, None, etc.)
-    valid_simulations = []
-    for p1, p2, ret in zip(param1_values, param2_values, returns):
-        if (p1 is not None and not pd.isna(p1) and
-            p2 is not None and not pd.isna(p2) and
-            ret is not None and not pd.isna(ret)):
-            valid_simulations.append((p1, p2, ret))
-
-    if not valid_simulations:
-        print("Warning: No valid parameter combinations found in simulation data, skipping parameter sensitivity subplot")
-        return
-
-    param1_values, param2_values, returns = zip(*valid_simulations)
-
-    # Create scatter plot with improved visualization
-    fig.add_trace(go.Scatter(
-        x=param1_values, y=param2_values,
-        mode='markers',
-        marker=dict(
-            size=10,
-            color=returns,
-            colorscale='RdYlGn',  # Red-Yellow-Green scale (red=bad, green=good)
-            colorbar=dict(
-                title="Return (%)", 
-                x=0.52,  # Position colorbar to the right of parameter sensitivity plot
-                y=0.85,  # Position at top
-                len=0.3,  # Make it shorter
-                thickness=15,
-                xpad=10  # Add padding from the plot
-            ),
-            showscale=True,
-            line=dict(width=1, color='white')  # Add white border to markers
-        ),
-        text=[f"P1: {p1}<br>P2: {p2}<br>Return: {r:.2f}%" for p1, p2, r in zip(param1_values, param2_values, returns)],
-        hovertemplate="<b>Parameter 1:</b> %{x}<br>" +
-                      "<b>Parameter 2:</b> %{y}<br>" +
-                      "<b>Return:</b> %{marker.color:.2f}%<br>" +
-                      "<extra></extra>",
-        showlegend=False,
-        name='Parameter Combinations'
-    ), row=1, col=2)
-
-    # Add best performance marker
-    best_idx = returns.index(max(returns))
-    fig.add_trace(go.Scatter(
-        x=[param1_values[best_idx]], y=[param2_values[best_idx]],
-        mode='markers',
-        marker=dict(size=15, color='gold', symbol='star', line=dict(width=2, color='black')),
-        name='Best Performance',
-        showlegend=True,
-        hovertemplate=f"<b>Best Combination</b><br>P1: {param1_values[best_idx]}<br>P2: {param2_values[best_idx]}<br>Return: {returns[best_idx]:.2f}%<extra></extra>"
-    ), row=1, col=2)
-
-    # Update axes labels with better formatting and positioning
-    fig.update_xaxes(title_text="Parameter 1", row=1, col=2, showgrid=True, gridcolor='rgba(255,255,255,0.1)')
-    fig.update_yaxes(
-        title_text="Parameter 2", 
-        row=1, col=2, 
-        showgrid=True, 
-        gridcolor='rgba(255,255,255,0.1)',
-        title_standoff=25  # Add more space between y-axis title and plot to avoid colorbar overlap
-    )
-
-
-def _add_mc_percentiles(fig: go.Figure, returns_data: list, statistics: dict) -> None:
-    """Add Monte Carlo simulation paths visualization using path_matrix if present."""
-    # Try to access path_matrix injected by _plot_monte_carlo
-    path_matrix = getattr(_add_mc_percentiles, "_path_matrix_ref", None)
-
-    if path_matrix is not None:
-        try:
-            arr = np.asarray(path_matrix)
-            if arr.ndim == 2 and arr.size > 0:
-                T, N = arr.shape
-                max_paths = min(100, N)
-                cols = np.linspace(0, N - 1, max_paths, dtype=int) if N > max_paths else np.arange(N, dtype=int)
-                max_T = 1000
-                t_idx = np.arange(0, T, int(np.ceil(T / max_T)), dtype=int) if T > max_T else np.arange(T, dtype=int)
-
-                for j, c in enumerate(cols):
-                    series = arr[t_idx, c]
-                    if series.size == 0 or not np.isfinite(series).any():
+            max_paths = min(50, N)
+            path_indices = np.random.choice(N, max_paths, replace=False) if N > max_paths else np.arange(N)
+            
+            paths_added = 0
+            time_axis = np.arange(T)
+            
+            for i, path_idx in enumerate(path_indices):
+                try:
+                    path_values = arr[:, path_idx]
+                    
+                    if path_values.size < 2 or not np.isfinite(path_values).any():
                         continue
+                    
+                    # Check for variation
+                    valid_values = path_values[np.isfinite(path_values)]
+                    if np.all(valid_values == valid_values[0]):
+                        if DEBUG:
+                            print(f"Debug: Path {path_idx} has no variation, skipping")
+                        continue
+
+                    opacity = max(0.1, min(0.3, 20.0 / max_paths))
+                    color_rgba = f'rgba(100,149,237,{opacity})'
+                    first = (i == 0)
                     fig.add_trace(go.Scatter(
-                        y=series.astype(float),
-                        mode='lines',
-                        line={'color': 'rgba(100,149,237,0.25)', 'width': 1},
-                        name='MC Simulation' if j == 0 else None,
-                        showlegend=(j == 0),
-                        hovertemplate="MC Path<br>Return: %{y:.2f}%<extra></extra>"
+                        x=time_axis, y=path_values, mode='lines',
+                        line={'color': color_rgba, 'width': 1},
+                        name='MC Simulation' if first else None, showlegend=first,
+                        hovertemplate="Day: %{x}<br>Return: %{y:.2f}%<extra></extra>"
                     ), row=2, col=1)
+                    paths_added += 1
+                    
+                except Exception as e:
+                    if DEBUG:
+                        print(f"Debug: Failed to plot path {path_idx}: {e}")
+                    continue
+            
+            if paths_added > 0:
+                if DEBUG:
+                    print(f"Debug: Successfully plotted {paths_added} paths from path_matrix")
+                return True
+            else:
+                if DEBUG:
+                    print("Debug: No valid paths found in path_matrix")
+                
+    except Exception as e:
+        if DEBUG:
+            print(f"Debug: path_matrix plotting failed: {e}")
 
-                # Overlay strategy equity if provided
-                strategy_equity = statistics.get('strategy_equity_curve', [])
-                if strategy_equity:
-                    se = np.asarray(strategy_equity, dtype=float)
-                    if se.size > 1 and np.isfinite(se[0]) and se[0] != 0:
-                        strat_norm = (se / se[0] - 1.0) * 100.0
-                        if strat_norm.size > t_idx.size:
-                            strat_norm = strat_norm[:t_idx.size]
-                        fig.add_trace(go.Scatter(
-                            y=strat_norm.astype(float),
-                            mode='lines',
-                            line={'color': 'red', 'width': 3},
-                            name='Your Strategy',
-                            showlegend=True
-                        ), row=2, col=1)
-                return
-        except Exception as e:
-            print(f"MC path_matrix plotting failed: {e}")
+    return False
 
-    # Legacy fallback: sample equity_curve from simulations if available
-    simulations = statistics.get('simulations', [])
-    if isinstance(simulations, list) and len(simulations) > 0:
-        max_paths = min(50, len(simulations))
-        sample_indices = np.linspace(0, len(simulations)-1, max_paths, dtype=int)
-        for i, idx in enumerate(sample_indices):
+
+def _plot_from_individual_simulations(fig: go.Figure, simulations: list) -> bool:
+    """Plot simulation paths from individual simulation equity curves."""
+    if DEBUG:
+        print("Debug: Attempting to plot individual simulation equity curves")
+    max_paths = min(50, len(simulations))
+    sample_indices = np.linspace(0, len(simulations)-1, max_paths, dtype=int)
+    
+    paths_added = 0
+    for i, idx in enumerate(sample_indices):
+        try:
             sim = simulations[idx]
-            eq = sim.get('equity_curve')
-            if eq is None or len(eq) == 0:
+            if not isinstance(sim, dict):
                 continue
-            s0 = eq[0]
-            if s0 is None or s0 == 0 or not np.isfinite(s0):
+                
+            equity_curve = sim.get('equity_curve', sim.get('portfolio_value', sim.get('value', None)))
+            if equity_curve is None or len(equity_curve) == 0:
                 continue
-            normalized_curve = ((np.asarray(eq, dtype=float) / float(s0)) - 1.0) * 100.0
-            normalized_curve = normalized_curve[np.isfinite(normalized_curve)]
-            if normalized_curve.size == 0:
+            
+            eq_array = np.asarray(equity_curve, dtype=float)
+            if eq_array.size < 2:
                 continue
+            
+            valid_mask = np.isfinite(eq_array) & (eq_array != 0)
+            if not valid_mask.any():
+                continue
+            
+            first_valid_idx = np.where(valid_mask)[0][0]
+            start_value = eq_array[first_valid_idx]
+            normalized_curve = ((eq_array / start_value) - 1.0) * 100.0
+            
+            if not np.isfinite(normalized_curve).any():
+                continue
+            
+            time_axis = np.arange(len(normalized_curve))
+            opacity = max(0.1, min(0.3, 20.0 / max_paths))
+            
             fig.add_trace(go.Scatter(
-                y=normalized_curve.tolist(),
-                mode='lines',
-                line={'color': 'rgba(100,149,237,0.25)', 'width': 1},
-                name='MC Simulation' if i == 0 else None,
-                showlegend=(i == 0),
-                hovertemplate="MC Path<br>Return: %{y:.2f}%<extra></extra>"
+                x=time_axis, y=normalized_curve, mode='lines',
+                line={'color': f'rgba(100,149,237,{opacity})', 'width': 1},
+                name='MC Simulation' if i == 0 else None, showlegend=(i == 0),
+                hovertemplate="Day: %{x}<br>Return: %{y:.2f}%<extra></extra>"
             ), row=2, col=1)
-        # Strategy overlay
-        strategy_equity = statistics.get('strategy_equity_curve', [])
-        if strategy_equity:
+            paths_added += 1
+            
+        except Exception as e:
+            if DEBUG:
+                print(f"Debug: Failed to plot simulation {idx}: {e}")
+            continue
+    
+    if paths_added > 0:
+        if DEBUG:
+            print(f"Debug: Successfully plotted {paths_added} simulation paths")
+        return True
+
+    return False
+
+
+def _add_strategy_overlay(fig: go.Figure, statistics: dict) -> None:
+    """Add strategy equity curve overlay if available."""
+    strategy_equity = statistics.get('strategy_equity_curve', [])
+    if strategy_equity and len(strategy_equity) > 1:
+        try:
             se = np.asarray(strategy_equity, dtype=float)
             if se.size > 1 and np.isfinite(se[0]) and se[0] != 0:
                 strat_norm = (se / se[0] - 1.0) * 100.0
+                time_axis = np.arange(len(strat_norm))
+                
                 fig.add_trace(go.Scatter(
-                    y=strat_norm.astype(float),
-                    mode='lines',
-                    line={'color': 'red', 'width': 3},
-                    name='Your Strategy',
-                    showlegend=True
+                    x=time_axis, y=strat_norm, mode='lines',
+                    line={'color': 'red', 'width': 3}, name='Your Strategy', showlegend=True,
+                    hovertemplate="Day: %{x}<br>Strategy Return: %{y:.2f}%<extra></extra>"
                 ), row=2, col=1)
-        return
+        except Exception as e:
+            print(f"Debug: Failed to plot strategy equity curve: {e}")
 
-    # Last resort: percentile curve only if no paths available
-    if returns_data:
-        arr = np.asarray(returns_data, dtype=float)
-        arr = arr[np.isfinite(arr)]
-        if arr.size > 0:
-            percentiles = [5, 10, 25, 50, 75, 90, 95]
-            percentile_values = [float(np.percentile(arr, p)) for p in percentiles]
-            fig.add_trace(go.Scatter(
-                x=percentiles, y=percentile_values, mode='lines+markers',
-                name='Random Performance Curve', line={'color': 'cyan', 'width': 3},
-                marker={'size': 8}, showlegend=True
-            ), row=2, col=1)
-            actual_return = statistics.get('actual_return')
-            if actual_return is not None and np.isfinite(actual_return):
-                percentile_rank = statistics.get('percentile_rank', 50)
-                fig.add_trace(go.Scatter(
-                    x=[percentile_rank], y=[actual_return], mode='markers',
-                    name='Your Strategy', marker={'color': 'red', 'size': 12, 'symbol': 'diamond'},
-                    showlegend=True
-                ), row=2, col=1)
+def _add_mc_percentiles(fig: go.Figure,statistics: dict) -> None:
+    """Add Monte Carlo simulation paths visualization."""
+    
+    simulations = statistics.get('simulations', [])
+    path_matrix = getattr(_add_mc_percentiles, "_path_matrix_ref", None)
+    
+    if DEBUG:
+        print(f"Debug: Found {len(simulations)} simulations, path_matrix: {path_matrix is not None}")
+        if path_matrix is not None:
+            print(f"Debug: path_matrix shape: {path_matrix.shape}, dtype: {path_matrix.dtype}")
+            print(f"Debug: path_matrix sample values: {path_matrix[:5, :3] if path_matrix.size > 0 else 'empty'}")
+
+        if simulations:
+            sample_sim = simulations[0] if simulations else {}
+            print(f"Debug: Sample simulation keys: {list(sample_sim.keys())}")
+            print(f"Debug: Sample simulation equity_curve: {sample_sim.get('equity_curve', 'None')}")
+    
+    # Plot simulation paths
+    if path_matrix is not None:
+        _plot_from_path_matrix(fig, path_matrix)
+    elif simulations:
+        _plot_from_individual_simulations(fig, simulations)
+    
+    # Add strategy equity curve overlay if available
+    _add_strategy_overlay(fig, statistics)
+    
 
 
 def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
@@ -565,10 +534,12 @@ def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
     categories = ['Random\nMean', 'Strategy', 'Random\n+1σ', 'Random\n-1σ']
     colors = ['lightgray', 'red', 'lightgreen', 'orange']
 
-    # Add bars
-    for i, (category, val, color) in enumerate(zip(categories, values.tolist(), colors)):
+    # Add bars (compact)
+    cats = categories
+    vals = values.tolist()
+    cols = colors
+    for i, (category, val, color) in enumerate(zip(cats, vals, cols)):
         showlegend = i < 2
-        # Use 'outside' when absolute value is small to keep labels readable
         text_position = 'outside' if abs(val) < 1 else 'inside'
         text_color = 'white' if text_position == 'inside' else color
 
@@ -578,7 +549,7 @@ def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
             showlegend=showlegend,
             text=f'{val:.2f}%',
             textposition=text_position,
-            textfont=dict(color=text_color, size=10)
+            textfont={'color': text_color, 'size': 10}
         ), row=2, col=2)
 
     # Zero reference
@@ -759,7 +730,6 @@ def _plot_multi_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
     _plot_asset_ranking(fig, windows[-1], asset_names)
 
     fig.update_layout(
-        height=None, width=None,
         title_text="Multi-Asset Walk-Forward Analysis - VectorBT Enhanced",
         template='plotly_dark', showlegend=True
     )
@@ -767,12 +737,14 @@ def _plot_multi_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
     return {"success": True}
 
 
-def _plot_asset_returns(fig: go.Figure, windows: list, asset_names: list, 
+def _plot_asset_returns(fig: go.Figure, windows: list, asset_names: list,
                        window_nums: list, colors: list) -> None:
     """Plot asset returns for multi-asset walkforward analysis."""
     for i, asset in enumerate(asset_names):
         color = colors[i % len(colors)]
-        train_returns, test_returns = _extract_asset_data(windows, asset)
+        # Inline extraction (avoid bouncing to a tiny helper)
+        train_returns = [w.get('asset_results', {}).get(asset, {}).get('train_return', 0) for w in windows]
+        test_returns  = [w.get('asset_results', {}).get(asset, {}).get('test_return', 0)  for w in windows]
 
         # Add traces for train, test, and comparison
         fig.add_trace(go.Scatter(
@@ -791,17 +763,7 @@ def _plot_asset_returns(fig: go.Figure, windows: list, asset_names: list,
         ), row=2, col=1)
 
 
-def _extract_asset_data(windows: list, asset: str) -> tuple:
-    """Extract train and test returns for a specific asset."""
-    train_returns = []
-    test_returns = []
-    
-    for w in windows:
-        asset_data = w.get('asset_results', {}).get(asset, {})
-        train_returns.append(asset_data.get('train_return', 0))
-        test_returns.append(asset_data.get('test_return', 0))
-        
-    return train_returns, test_returns
+# Note: _extract_asset_data inlined into _plot_asset_returns to reduce code hopping and declutter.
 
 
 def _plot_asset_ranking(fig: go.Figure, final_window: dict, asset_names: list) -> None:
@@ -841,7 +803,6 @@ def _add_diagonal_lines(fig, x_data, y_data, row, col):
 def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
     """Create default vs optimized comparison plot."""
     try:
-        import plotly.graph_objects as go
         
         # Extract stats from both backtests
         default_stats = None
@@ -910,13 +871,12 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
             xaxis_title='Metrics',
             yaxis_title='Values',
             barmode='group',
-            template='plotly_dark',
-            height=600
+            template='plotly_dark'
         )
         fig.show()
 
         # Print improvement summary
-        print(f"\nOptimization Impact Summary:")
+        print("\nOptimization Impact Summary:")
         print(f"   Return: {default_values[0]:.2f}% → {optimized_values[0]:.2f}% ({optimized_values[0] - default_values[0]:+.2f}%)")
         print(f"   Sharpe: {default_values[1]:.3f} → {optimized_values[1]:.3f} ({optimized_values[1] - default_values[1]:+.3f})")
         print(f"   Max DD: {default_values[2]:.2f}% → {optimized_values[2]:.2f}% ({optimized_values[2] - default_values[2]:+.2f}%)")
@@ -932,36 +892,17 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
 def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
     """Create enhanced visualizations with default vs optimized comparison."""
     try:
-        # Collect portfolios for plotting
-        portfolios = {}
-        default_portfolios = {}
-        
-        # Get optimized results - portfolios are stored directly now
-        if 'full_backtest' in results:
-            for symbol, timeframes in results['full_backtest'].items():
-                for timeframe, portfolio in timeframes.items():
-                    if hasattr(portfolio, 'stats'):
-                        portfolios[f"{symbol}_{timeframe}_optimized"] = portfolio
-        
-        # Get default results (if available) - portfolios are stored directly now
-        if 'default_backtest' in results:
-            for symbol, timeframes in results['default_backtest'].items():
-                for timeframe, portfolio in timeframes.items():
-                    if hasattr(portfolio, 'stats'):
-                        default_portfolios[f"{symbol}_{timeframe}_default"] = portfolio
-                        portfolios[f"{symbol}_{timeframe}_default"] = portfolio
+        portfolios = _extract_portfolios_from_results(results)
         
         if portfolios:
-            # Enhanced plotting with comparison data
             plot_results = plot_comprehensive_analysis(
-                portfolios,  # Use positional argument
-                strategy_name,
+                portfolios, strategy_name,
                 results.get('monte_carlo', {}),
                 results.get('walkforward', {})
             )
             
-            # Create default vs optimized comparison plot if both exist
-            if default_portfolios and len(portfolios) > len(default_portfolios):
+            # Add comparison plot if we have both default and optimized results
+            if 'default_backtest' in results and 'full_backtest' in results:
                 print("Creating Default vs Optimized comparison...")
                 comparison_results = create_comparison_plot(results, strategy_name)
                 if plot_results is None:
@@ -975,3 +916,24 @@ def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[s
     except Exception as e:
         print(f"Visualization failed: {e}")
         return {"success": False, "error": str(e)}
+
+
+def _extract_portfolios_from_results(results: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract portfolios from results structure."""
+    portfolios = {}
+    
+    # Get default results first to control order
+    if 'default_backtest' in results:
+        for symbol, timeframes in results['default_backtest'].items():
+            for timeframe, portfolio in timeframes.items():
+                if hasattr(portfolio, 'stats'):
+                    portfolios[f"{symbol}_{timeframe}_default"] = portfolio
+
+    # Get optimized results after defaults
+    if 'full_backtest' in results:
+        for symbol, timeframes in results['full_backtest'].items():
+            for timeframe, portfolio in timeframes.items():
+                if hasattr(portfolio, 'stats'):
+                    portfolios[f"{symbol}_{timeframe}_optimized"] = portfolio
+    
+    return portfolios

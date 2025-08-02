@@ -1,41 +1,26 @@
 #!/usr/bin/env python3
 """
-Simplified Functional Parameter Optimizer
-Works directly with signal functions with maximum flexibility.
+Simple Parameter Optimizer
 """
-
+from itertools import product
+from typing import Dict, Any, List, Optional, Callable, NamedTuple
 import time
-import warnings
-from typing import Dict, Any, List, Optional, NamedTuple, Callable
 import numpy as np
 import pandas as pd
 import vectorbt as vbt
-from itertools import product
 from scipy import stats
 
-# Import strategy functions
 from strategies import get_strategy_signal_function
 from backtest import run_backtest
 from data_manager import load_strategy_config
 
-warnings.filterwarnings('ignore', category=FutureWarning, module='pandas')
-
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-DEFAULT_CONFIG = {
-    'split_ratio': 0.7,
+# Simple config
+CONFIG = {
     'init_cash': 10000,
     'fees': 0.001,
-    'verbose': False,
-    'max_test_combinations': 20,  # Maximum combinations to test for speed
-    'monte_carlo_simulations': 1000,  # Number of Monte Carlo simulations
-    'monte_carlo_batch_size': 128,    # Batch size for MC
-    'random_seed': None               # Optional RNG seed for reproducibility
+    'max_combinations': 50,
+    'mc_simulations': 500
 }
-
-DEFAULT_PARAM_GRIDS = {}
 
 # =============================================================================
 # CORE CLASSES
@@ -69,7 +54,7 @@ class OptimizationResult(NamedTuple):
 
 class Optimizer:
     def __init__(self, config: Optional[Dict] = None):
-        self.config = {**DEFAULT_CONFIG, **(config or {})}
+        self.config = {**CONFIG, **(config or {})}
     
     def optimize(self, market_data: pd.DataFrame, signal_function: Callable,
                  param_grid: Dict[str, List]) -> OptimizationResult:
@@ -325,7 +310,12 @@ def _load_and_expand_param_grid(strategy):
                     if isinstance(min_val, int) and isinstance(max_val, int):
                         expanded_grid[param_name] = list(range(min_val, max_val + 1))
                     else:
-                        expanded_grid[param_name] = [min_val + (max_val - min_val) * i / 9 for i in range(10)]
+                        # Special handling for threshold parameters - keep them small
+                        if 'threshold' in param_name.lower() and min_val == 0.0:
+                            # For threshold parameters, use more values near 0
+                            expanded_grid[param_name] = [0.0, 0.01, 0.02, 0.05, 0.1, max_val]
+                        else:
+                            expanded_grid[param_name] = [min_val + (max_val - min_val) * i / 9 for i in range(10)]
                 else:
                     expanded_grid[param_name] = param_values
             else:
@@ -357,13 +347,13 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
             return {'error': 'empty_param_grid', 'summary': 'No parameters to sample for MC'}
 
         # Configurable knobs
-        num_simulations = int(DEFAULT_CONFIG.get('monte_carlo_simulations', 1000))
+        num_simulations = int(CONFIG.get('monte_carlo_simulations', 1000))
         if num_simulations <= 0:
             return {'error': 'zero_simulations', 'summary': 'monte_carlo_simulations must be > 0'}
 
-        batch_size = int(DEFAULT_CONFIG.get('monte_carlo_batch_size', 128))
+        batch_size = int(CONFIG.get('monte_carlo_batch_size', 128))
         batch_size = max(1, batch_size)
-        seed = DEFAULT_CONFIG.get('random_seed', None)
+        seed = CONFIG.get('random_seed', None)
         if seed is not None and np.isfinite(seed):
             np.random.seed(int(seed))
 
@@ -426,13 +416,31 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
                         continue
 
                     norm = (eq_series.values / s0 - 1.0) * 100.0
-                    # Guard against Inf/NaN in path
-                    mask = np.isfinite(norm)
-                    if not mask.any():
+                    
+                    # Handle NaN/Inf values by forward filling instead of removing them
+                    # This preserves the time series length
+                    if not np.isfinite(norm).any():
                         failures += 1
                         continue
-                    norm = norm[mask]
-                    path_matrix_list.append(norm.astype(np.float32))  # store as float32 to save memory
+                    
+                    # Forward fill NaN/Inf values to maintain time series integrity
+                    norm_clean = np.copy(norm)
+                    finite_mask = np.isfinite(norm_clean)
+                    
+                    # If first value is not finite, find first finite value
+                    if not finite_mask[0]:
+                        first_finite_idx = np.where(finite_mask)[0]
+                        if len(first_finite_idx) == 0:
+                            failures += 1
+                            continue
+                        norm_clean[:first_finite_idx[0]] = 0.0  # Start at 0% return
+                    
+                    # Forward fill any remaining NaN/Inf values
+                    for i in range(1, len(norm_clean)):
+                        if not np.isfinite(norm_clean[i]):
+                            norm_clean[i] = norm_clean[i-1]
+                    
+                    path_matrix_list.append(norm_clean.astype(np.float32))  # store as float32 to save memory
 
                     # Collect sim record
                     sim_record = {
@@ -459,15 +467,22 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
             print("⚠️ No successful simulations; returning empty Monte Carlo result")
             return {'error': 'no_successful_simulations', 'simulations': [], 'statistics': {}, 'summary': 'No MC sims succeeded'}
 
-        target_len = int(np.percentile(lengths, 10))
+        # Use a more robust target length - use the most common length or median
+        target_len = int(np.median(lengths))
         target_len = max(10, min(target_len, n_bars))
+        
+        print(f"   Debug: Path lengths - min: {min(lengths)}, max: {max(lengths)}, median: {np.median(lengths)}, target: {target_len}")
+        
         def fit_length(arr: np.ndarray) -> np.ndarray:
+            if len(arr) == 0:
+                print("   Warning: Empty array in path_matrix_list, this should not happen")
+                return np.zeros((target_len,), dtype=np.float32)
+            
             if len(arr) >= target_len:
                 return arr[:target_len]
-            # pad with last value to maintain shape
-            if len(arr) == 0:
-                return np.zeros((target_len,), dtype=np.float32)
-            pad_val = arr[-1]
+            
+            # Pad with last value to maintain shape
+            pad_val = arr[-1] if len(arr) > 0 else 0.0
             pad = np.full((target_len - len(arr),), pad_val, dtype=np.float32)
             return np.concatenate([arr, pad], axis=0)
 

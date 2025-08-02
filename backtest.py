@@ -71,7 +71,7 @@ def get_available_strategies(config_dir: str = DEFAULT_CONFIG_DIR) -> List[str]:
     if not os.path.exists(config_dir):
         return []
 
-    excluded = {'data_sources.yaml', 'global_config.yaml', 'settings.yaml', 'vectorbt.yaml'}
+    excluded = {'data_sources.yaml', 'global_config.yaml', 'settings.yaml'}
     strategies = []
 
     for filename in os.listdir(config_dir):
