@@ -6,7 +6,11 @@ Multi-timeframe opening range breakout strategy.
 
 from typing import Dict, List
 import pandas as pd
-from base import Signals
+from collections import namedtuple
+import vectorbt as vbt
+
+# Simple signals container
+Signals = namedtuple('Signals', ['entries', 'exits', 'short_entries', 'short_exits'], defaults=[None, None])
 
 
 def create_orb_signals(df: pd.DataFrame, **params) -> Signals:
@@ -49,10 +53,6 @@ def get_orb_required_timeframes(params: Dict) -> List[str]:
     """Get required timeframes for ORB strategy."""
     return params.get('required_timeframes', ['15m', '1h'])
 
-
-
-
-
 def generate_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
     """Generate ORB signals from multi-timeframe data."""
     if not tf_data:
@@ -74,4 +74,22 @@ def generate_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
     return create_orb_signals(primary_df, **params)
 
 
-# Pure functional approach - no classes needed
+def create_orb_portfolio(data: pd.DataFrame, params: Dict = None) -> vbt.Portfolio:
+    """Create VectorBT portfolio directly from data and parameters."""
+    
+        
+    # Generate signals
+    signals = create_orb_signals(data, **params)
+    
+    # Create portfolio
+    portfolio = vbt.Portfolio.from_signals(
+        close=data['close'],
+        entries=signals.entries,
+        exits=signals.exits,
+        short_entries=signals.short_entries,
+        short_exits=signals.short_exits,
+        init_cash=10000,
+        fees=0.001
+    )
+    
+    return portfolio

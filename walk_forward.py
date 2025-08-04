@@ -4,9 +4,9 @@ Walk-Forward Analysis - Simple and Practical Implementation
 """
 
 import pandas as pd
-from strategies import get_strategy_signal_function
+# Removed unused import - using strategy_registry now
 from typing import Dict, Any
-from backtest import run_backtest
+import vectorbt as vbt
 
  
 def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
@@ -19,7 +19,7 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
         window_size = max(50, len(data) // 4)  # 25% windows, min length safeguard
         step_size = max(25, window_size // 2)  # 50% overlap, min step safeguard
         
-        signal_func = get_strategy_signal_function(strategy.name)
+        from strategy_registry import create_portfolio
         windows = []
         
         for i in range(0, len(data) - window_size, step_size):
@@ -40,28 +40,24 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
             try:
                 primary_tf = strategy.get_required_timeframes()[0]
                 # Train period
-                train_signals = signal_func(
-                    {primary_tf: train_data},
-                    strategy.parameters
-                )
-                train_entries = getattr(train_signals, 'entries', None)
-                train_exits = getattr(train_signals, 'exits', None)
-                train_trades_hint = int(train_entries.sum()) if hasattr(train_entries, 'sum') else -1
-
-                train_portfolio = run_backtest(train_data, train_signals)
+                train_portfolio = create_portfolio(strategy.name, train_data, strategy.parameters)
                 train_stats = train_portfolio.stats()
                 
+                # Get trade count from portfolio
+                try:
+                    train_trades_hint = len(train_portfolio.trades.records_readable)
+                except:
+                    train_trades_hint = 0
+                
                 # Test period
-                test_signals = signal_func(
-                    {primary_tf: test_data},
-                    strategy.parameters
-                )
-                test_entries = getattr(test_signals, 'entries', None)
-                test_exits = getattr(test_signals, 'exits', None)
-                test_trades_hint = int(test_entries.sum()) if hasattr(test_entries, 'sum') else -1
-
-                test_portfolio = run_backtest(test_data, test_signals)
+                test_portfolio = create_portfolio(strategy.name, test_data, strategy.parameters)
                 test_stats = test_portfolio.stats()
+                
+                # Get trade count from portfolio
+                try:
+                    test_trades_hint = len(test_portfolio.trades.records_readable)
+                except:
+                    test_trades_hint = 0
 
                 # Fallback: if Total Return missing, compute from value series
                 def total_return_pct(pf):

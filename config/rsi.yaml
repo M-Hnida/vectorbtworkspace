@@ -14,4 +14,4 @@ data_requirements:
   required_columns: ["open", "high", "low", "close"]
 
 csv_path:
-  - "data/EURUSD_1H_2009-2025.csv"
+  - "data/BTCUSD_1h_2011-2025.csv"

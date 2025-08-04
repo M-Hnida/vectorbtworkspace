@@ -10,9 +10,7 @@ import pandas as pd
 import vectorbt as vbt
 from scipy import stats
 
-from strategies import get_strategy_signal_function
-from backtest import run_backtest
-from data_manager import load_strategy_config
+# Removed unused imports - using strategy_registry now
 
 # Simple config
 CONFIG = {
@@ -211,22 +209,27 @@ class Optimizer:
 # MONTE CARLO ANALYSIS
 # =============================================================================
 
-def run_optimization(strategy, strategy_config, data: pd.DataFrame) -> Dict[str, Any]:
-    """Run parameter optimization."""
+def run_optimization(strategy_name: str, data: pd.DataFrame, param_grid: Dict = None) -> Dict[str, Any]:
+    """Run parameter optimization with direct portfolio creation."""
+    from strategy_registry import create_portfolio, get_optimization_grid, get_default_parameters
+    
     try:
-        
-        if not hasattr(strategy_config, 'optimization_grid') or not strategy_config.optimization_grid:
+        # Get optimization grid
+        if param_grid is None:
+            param_grid = get_optimization_grid(strategy_name)
+            
+        if not param_grid:
             print("⚠️ No optimization grid found, using default parameters")
-            return {'best_params': strategy.parameters}
+            return {'best_params': get_default_parameters(strategy_name)}
 
-        # Get the signal function
-        signal_func = get_strategy_signal_function(strategy.name)
-        param_grid = strategy_config.optimization_grid
-        print(f"🎯 Optimizing {strategy.name} with {len(param_grid)} parameters")
+        print(f"🎯 Optimizing {strategy_name} with {len(param_grid)} parameters")
 
+        # Use create_portfolio function directly
+        
         # Simple grid search implementation
-        best_params = strategy.parameters.copy()
+        best_params = get_default_parameters(strategy_name).copy()
         best_score = -999999
+        best_portfolio = None
 
         # Generate parameter combinations
         param_names = list(param_grid.keys())
@@ -235,59 +238,59 @@ def run_optimization(strategy, strategy_config, data: pd.DataFrame) -> Dict[str,
         
         print(f"📊 Testing {len(combinations)} parameter combinations...")
         
-        max_combinations = 10  # Default for standalone function
-        for combo in combinations[:max_combinations]:  # Limit for testing
-            test_params = strategy.parameters.copy()
+        max_combinations = 20
+        for combo in combinations[:max_combinations]:
+            test_params = best_params.copy()
             for name, value in zip(param_names, combo):
                 test_params[name] = value
 
-            # Generate signals with test parameters
-            signals = signal_func({strategy.get_required_timeframes()[0]: data}, test_params)
-            
-            # Quick backtest
-            portfolio = run_backtest(data, signals)
-            
-            # Calculate score (using Sharpe ratio)
+            # Create portfolio directly with test parameters
             try:
+                portfolio = create_portfolio(strategy_name, data, test_params)
                 stats = portfolio.stats()
                 score = float(stats.get('Sharpe Ratio', -999))
+                
                 if score > best_score:
                     best_score = score
                     best_params = test_params.copy()
-            except Exception:
+                    best_portfolio = portfolio
+                    
+            except Exception as e:
+                print(f"Failed combo {test_params}: {e}")
                 continue
 
-        # Update strategy with best parameters
-        strategy.parameters.update(best_params)
-        print(f"✅ Best parameters found: {best_params}")
+        if best_portfolio is not None:
+            print(f"✅ Best parameters found: {best_params} (Sharpe: {best_score:.3f})")
+        else:
+            print("⚠️ No successful parameter combinations found")
         
         return {
             'best_params': best_params,
             'best_score': best_score,
-            'tested_combinations': len(combinations)
+            'best_portfolio': best_portfolio,
+            'tested_combinations': min(len(combinations), max_combinations)
         }
         
     except Exception as e:
         print(f"⚠️ Optimization failed: {e}")
-        return {'error': str(e), 'best_params': strategy.parameters}
+        return {'error': str(e), 'best_params': get_default_parameters(strategy_name)}
 
 
-def _get_strategy_equity_curve(strategy, data: pd.DataFrame):
-    """Helper function to get strategy equity curve, reducing nesting."""
+def _get_strategy_equity_curve(strategy_name: str, data: pd.DataFrame, params: Dict):
+    """Helper function to get strategy equity curve."""
+    from strategy_registry import create_portfolio
     try:
-        signal_func = get_strategy_signal_function(strategy.name)
-        signals = signal_func({strategy.get_required_timeframes()[0]: data}, strategy.parameters)
-        portfolio = run_backtest(data, signals)
+        portfolio = create_portfolio(strategy_name, data, params)
         return portfolio.value().tolist()
     except Exception:
         return None
-def _get_actual_strategy_return(strategy, data: pd.DataFrame, actual_return: Optional[float] = None):
-    """Helper function to get actual strategy return, reducing nesting."""
-    if strategy is not None:
+
+def _get_actual_strategy_return(strategy_name: str, data: pd.DataFrame, params: Dict, actual_return: Optional[float] = None):
+    """Helper function to get actual strategy return."""
+    if strategy_name is not None:
         try:
-            signal_func = get_strategy_signal_function(strategy.name)
-            signals = signal_func({strategy.get_required_timeframes()[0]: data}, strategy.parameters)
-            portfolio = run_backtest(data, signals)
+            from strategy_registry import create_portfolio
+            portfolio = create_portfolio(strategy_name, data, params)
             actual_stats = portfolio.stats()
             return float(actual_stats.get('Total Return [%]', 0))
         except Exception:
@@ -295,11 +298,12 @@ def _get_actual_strategy_return(strategy, data: pd.DataFrame, actual_return: Opt
     return actual_return
 
 
-def _load_and_expand_param_grid(strategy):
-    """Helper function to load and expand parameter grid, reducing nesting."""
+def _load_and_expand_param_grid(strategy_name: str):
+    """Helper function to load and expand parameter grid."""
+    from strategy_registry import get_optimization_grid
+    
     try:
-        config = load_strategy_config(strategy.name if strategy else 'rsi')
-        param_grid = config.get('optimization_grid', {})
+        param_grid = get_optimization_grid(strategy_name)
         
         # Expand parameter ranges for better Monte Carlo sampling
         expanded_grid = {}
@@ -312,7 +316,6 @@ def _load_and_expand_param_grid(strategy):
                     else:
                         # Special handling for threshold parameters - keep them small
                         if 'threshold' in param_name.lower() and min_val == 0.0:
-                            # For threshold parameters, use more values near 0
                             expanded_grid[param_name] = [0.0, 0.01, 0.02, 0.05, 0.1, max_val]
                         else:
                             expanded_grid[param_name] = [min_val + (max_val - min_val) * i / 9 for i in range(10)]
@@ -323,15 +326,15 @@ def _load_and_expand_param_grid(strategy):
         return expanded_grid
         
     except:
-        # Fallback parameter ranges for RSI
+        # Fallback parameter ranges
         return {
-            'rsi_period': list(range(10, 29)),
-            'oversold_level': list(range(20, 36)),
-            'overbought_level': list(range(65, 81))
+            'vol_momentum_window': list(range(15, 26)),
+            'vol_momentum_threshold': [0.0, 0.01, 0.02, 0.05],
+            'wma_length': list(range(30, 71, 10))
         }
 
 
-def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: float = None) -> Dict[str, Any]:
+def run_monte_carlo_analysis(data: pd.DataFrame, strategy_name: str = None, params: Dict = None, actual_return: float = None) -> Dict[str, Any]:
     """Run Monte Carlo parameter sensitivity analysis with path matrix, batching, and robust stats."""
     try:
         t0 = time.time()
@@ -341,8 +344,12 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
         if n_bars < 10:
             return {'error': 'insufficient_data', 'summary': f'Not enough bars for MC: {n_bars}'}
 
-        actual_return = _get_actual_strategy_return(strategy, data, actual_return)
-        param_grid = _load_and_expand_param_grid(strategy)
+        from strategy_registry import get_default_parameters
+        if params is None:
+            params = get_default_parameters(strategy_name or "momentum")
+            
+        actual_return = _get_actual_strategy_return(strategy_name, data, params, actual_return)
+        param_grid = _load_and_expand_param_grid(strategy_name or "momentum")
         if not isinstance(param_grid, dict) or len(param_grid) == 0:
             return {'error': 'empty_param_grid', 'summary': 'No parameters to sample for MC'}
 
@@ -365,8 +372,7 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
         failures = 0
 
         # Strategy hooks
-        signal_func = get_strategy_signal_function(strategy.name if strategy else 'rsi')
-        tf_key = strategy.get_required_timeframes()[0] if strategy else '1H'
+        from strategy_registry import create_portfolio
         param_names = list(param_grid.keys())
 
         print(f"   Running {num_simulations} Monte Carlo simulations in batches of {batch_size}...")
@@ -394,8 +400,7 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
 
             for i, rnd_params in enumerate(batch_params, start=start):
                 try:
-                    signals = signal_func({tf_key: data}, rnd_params)
-                    portfolio = run_backtest(data, signals)
+                    portfolio = create_portfolio(strategy_name or "momentum", data, rnd_params)
                     metrics = _extract_metrics(portfolio)
                     total_return_pct = float(metrics.get('total_return', np.nan))
 
@@ -520,7 +525,7 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
         dt = time.time() - t0
         print(f"   MC done in {dt:.2f}s: success={success}, failures={failures}, valid_returns={valid_count}, path_matrix={path_matrix.shape}")
 
-        strategy_equity_curve = _get_strategy_equity_curve(strategy, data) if strategy else None
+        strategy_equity_curve = _get_strategy_equity_curve(strategy_name, data, params) if strategy_name else None
 
         statistics = {
             **stats_out,
@@ -559,142 +564,8 @@ def run_monte_carlo_analysis(data: pd.DataFrame, strategy=None, actual_return: f
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
-def _adapt_tf_to_df(tf_signal_fn: Callable, primary_tf: str = '1H') -> Callable:
-    """Adapter to call a multi-timeframe signal function with a single-DF signature."""
-    def df_fn(df: pd.DataFrame, **params):
-        tf_data = {primary_tf: df}
-        # Registry functions expect (tf_data, params_dict)
-        return tf_signal_fn(tf_data, params)
-    return df_fn
+# Removed obsolete optimize_strategy function - use run_optimization instead
 
-def optimize_strategy(market_data: pd.DataFrame, strategy_name: str,
-                     param_grid: Optional[Dict] = None, config: Optional[Dict] = None) -> Dict[str, Any]:
-    """Simple grid search optimization using Optimizer when a param_grid is provided."""
-    try:
-        if not param_grid:
-            print("⚠️ No optimization grid found, using default parameters")
-            return {'best_params': {}, 'best_score': 0}
+# Removed obsolete compare_strategies function
 
-        print(f"🎯 Optimizing {strategy_name} with {len(param_grid)} parameters")
-
-        # Prefer using the Optimizer with an adapter for consistency/performance
-        try:
-            tf_signal_fn = get_strategy_signal_function(strategy_name)
-            df_signal_fn = _adapt_tf_to_df(tf_signal_fn, primary_tf='1H')
-
-            opt = Optimizer(config=config)
-            opt_res = opt.optimize(market_data, df_signal_fn, param_grid)
-
-            print(f"✅ Optimization complete. Best composite: {opt_res.best_metrics.get('composite_score', float('nan')):.3f}")
-            return {
-                'best_params': opt_res.best_params,
-                'best_score': float(opt_res.best_metrics.get('sharpe_ratio', 0.0)),
-                'tested_combinations': int(len(list(product(*param_grid.values()))))
-            }
-        except Exception as e:
-            if config and config.get('verbose'):
-                print(f"⚠️ Optimizer path failed, falling back to simple loop: {e}")
-
-        # Fallback: original simple loop (TF-dict call)
-        signal_function = get_strategy_signal_function(strategy_name)
-        best_params = {}
-        best_score = -999999
-
-        # Generate parameter combinations
-        param_names = list(param_grid.keys())
-        param_values = list(param_grid.values())
-        combinations = list(product(*param_values))
-
-        max_combinations = config.get('max_test_combinations', 20) if config else 20
-        print(f"📊 Testing {min(len(combinations), max_combinations)} parameter combinations...")
-
-        for _, combo in enumerate(combinations[:max_combinations]):  # Limit for speed
-            test_params = dict(zip(param_names, combo))
-            try:
-                tf_data = {'1H': market_data}
-                signals = signal_function(tf_data, test_params)
-                portfolio = run_backtest(market_data, signals)
-
-                metrics = _extract_metrics(portfolio)
-                score = _composite_score(metrics)
-
-                if score > best_score:
-                    best_score = score
-                    best_params = test_params.copy()
-                    if config and config.get('verbose'):
-                        print(f"  ✅ New best: score={score:.3f} metrics={metrics} params={test_params}")
-            except Exception:
-                continue
-
-        if best_params:
-            print(f"✅ Optimization complete. Best Sharpe: {best_score:.3f}")
-            return {
-                'best_params': best_params,
-                'best_score': best_score,
-                'tested_combinations': min(len(combinations), max_combinations)
-            }
-        else:
-            print("⚠️ No successful parameter combinations found")
-            return {'best_params': {}, 'best_score': 0}
-
-    except Exception as e:
-        print(f"⚠️ Optimization failed: {e}")
-        return {'error': str(e), 'best_params': {}}
-
-def compare_strategies(data: pd.DataFrame, strategies: List[str]) -> pd.DataFrame:
-    """Compare multiple strategies."""
-    results = []
-    for strategy in strategies:
-        try:
-            result = optimize_strategy(data, strategy)
-            # Handle different return structures
-            if 'error' in result:
-                results.append({'strategy': strategy, 'error': str(result['error'])})
-            else:
-                results.append({
-                    'strategy': strategy,
-                    'sharpe': result.get('best_score', 0),
-                    'return': result.get('best_params', {}),
-                    'drawdown': 0,  # Not available in optimize_strategy return
-                    'time': 0  # Not available in optimize_strategy return
-                })
-        except Exception as e:
-            results.append({'strategy': strategy, 'error': str(e)})
-    
-    return pd.DataFrame(results).sort_values('sharpe', ascending=False, na_position='last')
-
-# =============================================================================
-# EXAMPLE USAGE
-# =============================================================================
-
-if __name__ == "__main__":
-    # Sample data
-    dates = pd.date_range('2020-01-01', '2023-01-01', freq='1H')
-    np.random.seed(42)
-    close = 100 + np.cumsum(np.random.randn(len(dates)) * 0.1)
-    
-    data = pd.DataFrame({
-        'open': close * (1 + np.random.randn(len(dates)) * 0.001),
-        'high': close * (1 + np.abs(np.random.randn(len(dates))) * 0.002),
-        'low': close * (1 - np.abs(np.random.randn(len(dates))) * 0.002),
-        'close': close
-    }, index=dates)
-    
-    # Load param grid from config if available
-    try:
-        cfg = load_strategy_config('vectorbt')
-        param_grid = cfg.get('optimization_grid', {})
-    except Exception:
-        param_grid = {}
-
-    # Optimize single strategy
-    result = optimize_strategy(data, 'vectorbt', param_grid=param_grid, config={'max_test_combinations': 20, 'verbose': True})
-    print(f"Best Sharpe: {result.get('best_score', 0):.3f}")
-
-    # Monte Carlo analysis
-    mc_results = run_monte_carlo_analysis(data, None, result.get('best_score', 0))
-    print(f"MC Mean Return: {mc_results.get('statistics', {}).get('mean_return', 0):.3f}")
-
-    # Compare strategies
-    comparison = compare_strategies(data, ['vectorbt', 'momentum'])
-    print(comparison)
+# Removed obsolete example usage section

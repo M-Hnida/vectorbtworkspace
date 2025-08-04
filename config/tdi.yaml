@@ -1,59 +1,60 @@
 # ============================================================
-# Configuration for the Traders Dynamic Index (TDI) Strategy
+# Configuration for the Traders Dynamic Index (TDI) Strategy - Multi-TF, Pivots SL/TP, ATR sizing
 # ============================================================
-name: "tdi_strategy"
+name: "tdi_strategy_mtft_pivatr"
 
 # ------------------------------------------------------------
 # Strategy Parameters
-# These are the base settings for the strategy.
-# The optimizer will override these with the ranges below.
 # ------------------------------------------------------------
 parameters:
-  # Pivot Point Parameters
-  pivot_timeframe: "1D"  # Timeframe for pivot point calculation
-  pivot_number: 2
-  target_probability: 50
-  
+  # Primary timeframe used to align signals / pivots application
+  primary_timeframe: "1h"
+
+  # Pivot Point Parameters (weekly pivots, like PERIOD_W1 approximation)
+  pivot_timeframe: "1W"            # informational; pivots are computed via resample('W')
+  pivot_number: 2                   # 1..2 supported (S1/S2 and R1/R2)
+  target_probability: 50            # target for tp_size / (tp_size + sl_size) * 100
+  sl_distance_min: 0.001            # minimal distance in price units (~10 pips on EURUSD)
+  tp_distance_min: 0.001
+
   # TDI Core Parameters
   rsi_period: 21
   tdi_fast_period: 2
   tdi_slow_period: 7
   tdi_middle_period: 34
-  tdi_angle_min: 20
-  tdi_angle_max: 80
-  
+
   # Multi-Timeframe Settings
   required_timeframes: ["15m", "30m", "1h", "4h", "1D"]
-  
-  # Signal Configuration (corresponds to timeframes above)
-  # Use only 1h timeframe for simpler, more reliable signals
+
+  # Families activation per timeframe (strict all-or-nothing)
+  # Example: enable cross+trend on 1h only
   tdi_cross_enabled: [false, false, true, false, false]
   tdi_trend_enabled: [false, false, true, false, false]
-  tdi_angle_enabled: [false, false, false, false, false]
   tdi_shift: 1
-  
-  # Risk Management (distances in price units, not pips)
-  risk_factor: 1.0
-  spread_max: 2.0
-  sl_distance_min: 0.001  # ~10 pips for EURUSD
-  tp_distance_min: 0.001  # ~10 pips for EURUSD
+
+  # ATR-based sizing
+  atr_length: 14
+  k_atr: 2.0
+  risk_pct: 1.0
+  use_equity_series: true
 
 # ------------------------------------------------------------
-# Optimization Parameter Ranges (Reduced for efficiency)
-# The grid search will test all combinations of these values.
-# Total combinations: 2 × 2 × 2 × 2 × 2 = 32 combinations
+# Optimization Parameter Ranges
 # ------------------------------------------------------------
 optimization_grid:
-  # Core TDI parameters (most impactful)
   rsi_period: [21, 34]
   tdi_fast_period: [2, 3]
   tdi_slow_period: [7, 10]
-  
-  # Pivot settings (key for entry/exit)
+  pivot_number: [1, 2]
   target_probability: [45, 55]
-  pivot_number: [2, 3]
+  tdi_shift: [0, 1, 2]
+  atr_length: [14, 20]
+  k_atr: [1.5, 2.0, 3.0]
+  risk_pct: [0.5, 1.0, 2.0]
 
-
+# ------------------------------------------------------------
+# Data sources (examples)
+# ------------------------------------------------------------
 csv_path:
   - "data/EURUSD_15m_2021-2025.csv"
   - "data/EURUSD_30m_2017_2025.csv"
