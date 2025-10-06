@@ -7,3 +7,7 @@ plotly>=5.0.0
 PyYAML>=6.0.0
 joblib>=1.0.0
 requests>=2.25.0
+ccxt>=4.0.0          # For live exchange data (Binance, etc.)
+
+# Optional: TA-Lib for exact Freqtrade compatibility
+# TA-Lib>=0.4.25     # Uncomment if you want exact Freqtrade indicator matching

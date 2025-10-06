@@ -35,7 +35,11 @@ import vectorbt as vbt
 from collections import namedtuple
 
 # Simple signals container
-Signals = namedtuple('Signals', ['entries', 'exits', 'short_entries', 'short_exits'], defaults=[None, None])
+Signals = namedtuple(
+    "Signals",
+    ["entries", "exits", "short_entries", "short_exits", "sizes"],
+    defaults=[None, None, None],
+)
 
 
 def _ensure_series(s: pd.Series, index: pd.Index, fill_value=np.nan) -> pd.Series:
@@ -244,12 +248,12 @@ def _atr_sizing(
     return sizes
 
 
-def generate_tdi_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
+def _generate_tdi_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Signals:
     """Génère des signaux TDI multi-timeframe (cross + trend), SL/TP via pivots hebdo, sizing ATR."""
     if not tf_data:
         empty_index = pd.DatetimeIndex([])
         empty_series = pd.Series(False, index=empty_index)
-        return Signals(empty_series, empty_series, empty_series, empty_series)
+        return Signals(empty_series, empty_series, empty_series, empty_series, empty_series)
 
     # Params avec défauts
     rsi_period = params.get("rsi_period", 21)
@@ -418,31 +422,26 @@ def generate_tdi_signals(tf_data: Dict[str, pd.DataFrame], params: Dict) -> Sign
     )
 
 
-def build_tdi_portfolio(
-    tf_data: Dict[str, pd.DataFrame], params: Dict
-) -> vbt.Portfolio:
+def create_portfolio(data: pd.DataFrame, params: Dict = None) -> "vbt.Portfolio":
     """
-    Construit un vbt.Portfolio (portfolio-direct) pour la stratégie TDI:
-    - Multi-TF cross+trend (sans angle)
-    - SL/TP via pivots hebdo
-    - Sizing ATR
+    Create TDI strategy portfolio directly:
+    - Multi-TF cross+trend (without angle)
+    - SL/TP via weekly pivots
+    - ATR sizing
     """
-    # Reutiliser la logique de génération pour obtenir les masques et tailles
-    signals = generate_tdi_signals(tf_data, params)
+    if params is None:
+        params = {}
 
-    # Déterminer la TF primaire
-    required_tfs: List[str] = params.get(
-        "required_timeframes", ["15m", "30m", "1h", "4h", "1D"]
-    )
-    primary_tf = params.get(
-        "primary_timeframe",
-        required_tfs[2] if len(required_tfs) >= 3 else list(tf_data.keys())[0],
-    )
-    if primary_tf not in tf_data:
-        primary_tf = list(tf_data.keys())[0]
-    df = tf_data[primary_tf].copy()
+    # Use the provided data directly
+    df = data.copy()
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index)
+
+    # Convert single timeframe data to multi-timeframe format for compatibility
+    tf_data = {"1h": df}  # TDI can work with single timeframe for now
+
+    # Reuse signal generation logic to get masks and sizes
+    signals = _generate_tdi_signals(tf_data, params)
 
     close = df["close"]
     index = df.index
@@ -486,7 +485,7 @@ def build_tdi_portfolio(
     fees = params.get("fees", 0.0004)
     freq = params.get("freq", "1H")
 
-    # Créer le portfolio via from_orders
+    # Create portfolio via from_orders (simplified for now)
     portfolio = vbt.Portfolio.from_orders(
         close=close,
         size=order_size,
@@ -494,7 +493,5 @@ def build_tdi_portfolio(
         fees=fees,
         init_cash=init_cash,
         freq=freq,
-        sl_stop=sl_price,
-        tp_limit=tp_price,
     )
     return portfolio

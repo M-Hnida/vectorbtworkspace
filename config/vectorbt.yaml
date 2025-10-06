@@ -1,31 +1,29 @@
 parameters:
-  bbands_period: 20
-  bbands_std: 2.0
-  adx_period: 14
-  adx_threshold: 25
-  adx_threshold_filter: 60
-  sma_period: 200
-  atr_period: 14
-  atr_mult: 1.0
-  risk_pct: 0.02
-  dca_size_increment: 0.01
-  max_dca_size: 0.10
-  max_side_exposure: 0.30
-  initial_cash: 500000  # Original notebook value
-  fee: 0.0004          # Original notebook value
+  fast_ma: 20
+  slow_ma: 50
+  bidirectional: true
+  initial_cash: 10000
+  fee: 0.001
   primary_timeframe: "1H"
+  # Enhancement parameters (no lookahead bias)
+  trend_strength_window: 20
+  trend_strength_threshold: 0.001
+  momentum_quality_threshold: 0.5
+  volatility_window: 20
+  volatility_threshold: 0.005
+  min_hold_bars: 6
 
 optimization_grid:
-  bbands_period: [15, 20, 25]
-  bbands_std: [1.5, 2.0, 2.5]
-  adx_threshold: [15, 20, 25, 30]
-  adx_threshold_filter: [50, 60, 70]
-  risk_pct: [0.01, 0.02, 0.03]
-  atr_mult: [0.5, 1.0, 1.5, 2.0]
+  fast_ma: [15, 20, 25]
+  slow_ma: [40, 50, 60]
+  trend_strength_threshold: [0.0005, 0.001, 0.002]
+  momentum_quality_threshold: [0.3, 0.5, 0.8]
+  volatility_threshold: [0.003, 0.005, 0.008]
+  min_hold_bars: [4, 6, 8]
 
 data_requirements:
   required_timeframes: ["1H"]
   required_columns: ["open", "high", "low", "close", "volume"]
 
 csv_path:
-  - "data/BTCUSD_1h_2011-2025.csv"
+  - "data/EURUSD_1H_2009-2025.csv"

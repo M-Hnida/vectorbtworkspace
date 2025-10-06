@@ -98,6 +98,7 @@ def _plot_monte_carlo(mc_results: Dict[str, Any]) -> None:
         print("No Monte Carlo simulations to plot")
         return
 
+    # Simplified returns data extraction
     returns_data = [sim['total_return'] for sim in simulations if 'total_return' in sim]
     if not returns_data:
         print("No valid returns data found")
@@ -152,6 +153,7 @@ def _extract_parameter_data(simulations: list) -> Optional[dict]:
     if not simulations:
         return None
     
+    # Find first simulation with parameters
     first_sim = next((s for s in simulations if isinstance(s, dict) and 'parameters' in s), None)
     if not first_sim:
         return None
@@ -160,9 +162,11 @@ def _extract_parameter_data(simulations: list) -> Optional[dict]:
     if not param_names:
         return None
     
+    # Initialize data structure
     param_data = {name: [] for name in param_names}
     param_data['returns'] = []
     
+    # Extract data from all simulations
     for sim in simulations:
         if not isinstance(sim, dict) or 'total_return' not in sim:
             continue
@@ -171,10 +175,12 @@ def _extract_parameter_data(simulations: list) -> Optional[dict]:
         if not parameters:
             continue
             
+        # Add parameter values (default to 0 if missing)
         for name in param_names:
             param_data[name].append(parameters.get(name, 0))
         param_data['returns'].append(sim['total_return'])
     
+    # Return None if no returns were found
     return param_data if param_data['returns'] else None
 
 
@@ -201,42 +207,45 @@ def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
             corr = float(returns[mask].corr(vals[mask], method='spearman'))
             scores.append((name, abs(corr)))
     
-    if scores:
-        scores.sort(key=lambda x: x[1], reverse=True)
-        names, vals = zip(*scores)
-        fig.add_trace(go.Bar(
-            x=[str(n) for n in names],
-            y=list(vals),
-            marker_color='cornflowerblue',
-            name='Param Importance (|Spearman|)'
-        ), row=1, col=2)
-        fig.update_yaxes(title_text="|Spearman|", row=1, col=2)
+    if not scores:
+        return
+        
+    scores.sort(key=lambda x: x[1], reverse=True)
+    names, vals = zip(*scores)
+    
+    # Add parameter importance bar chart
+    fig.add_trace(go.Bar(
+        x=[str(n) for n in names],
+        y=list(vals),
+        marker_color='cornflowerblue',
+        name='Param Importance (|Spearman|)'
+    ), row=1, col=2)
+    fig.update_yaxes(title_text="|Spearman|", row=1, col=2)
 
     # Top parameter violin plot
-    if scores:
-        top_param = scores[0][0]
-        top_vals = pd.Series(param_data[top_param])
-        mask = ~(top_vals.isna() | returns.isna())
-        if mask.sum() >= 5:
-            q = pd.qcut(top_vals[mask], q=min(5, mask.sum()), duplicates='drop')
-            grouped = pd.DataFrame({'bin': q.astype(str), 'ret': returns[mask].values})
-            med = grouped.groupby('bin')['ret'].median().sort_values()
-            ordered_bins = list(med.index)
-            
-            for b in ordered_bins:
-                vals = grouped[grouped['bin'] == b]['ret'].values
-                if len(vals) == 0:
-                    continue
-                label = f"{top_param} {b}"
-                fig.add_trace(go.Violin(
-                    y=vals,
-                    x=[label]*len(vals),
-                    name=label,
-                    line_color='lightblue',
-                    meanline_visible=True,
-                    showlegend=False
-                ), row=1, col=2)
-            fig.update_yaxes(title_text="Return (%)", row=1, col=2)
+    top_param = scores[0][0]
+    top_vals = pd.Series(param_data[top_param])
+    mask = ~(top_vals.isna() | returns.isna())
+    if mask.sum() >= 5:
+        q = pd.qcut(top_vals[mask], q=min(5, mask.sum()), duplicates='drop')
+        grouped = pd.DataFrame({'bin': q.astype(str), 'ret': returns[mask].values})
+        med = grouped.groupby('bin')['ret'].median().sort_values()
+        ordered_bins = list(med.index)
+        
+        for b in ordered_bins:
+            vals = grouped[grouped['bin'] == b]['ret'].values
+            if len(vals) == 0:
+                continue
+            label = f"{top_param} {b}"
+            fig.add_trace(go.Violin(
+                y=vals,
+                x=[label]*len(vals),
+                name=label,
+                line_color='lightblue',
+                meanline_visible=True,
+                showlegend=False
+            ), row=1, col=2)
+        fig.update_yaxes(title_text="Return (%)", row=1, col=2)
 
     # 2D heatmap for exactly two varying params
     varying = [n for n in param_names if len(set([v for v in param_data[n] if v is not None])) > 1]
@@ -274,135 +283,6 @@ def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
             ), row=1, col=2)
             fig.update_xaxes(title_text=str(x_param), row=1, col=2)
             fig.update_yaxes(title_text=str(y_param), row=1, col=2)
-
-
-def _plot_simulation_paths(fig: go.Figure, simulations: list, path_matrix: Optional[np.ndarray] = None) -> bool:
-    """Plot simulation paths from path_matrix or individual simulations."""
-    try:
-        if path_matrix is not None:
-            return _plot_from_path_matrix(fig, path_matrix)
-        
-        if simulations:
-            return _plot_from_individual_simulations(fig, simulations)
-        
-        return False
-    except Exception as e:
-        if DEBUG:
-            print(f"Debug: _plot_simulation_paths failed: {e}")
-        return False
-
-
-def _plot_from_path_matrix(fig: go.Figure, path_matrix) -> bool:
-    """Plot simulation paths from path_matrix."""
-    try:
-        arr = np.asarray(path_matrix, dtype=float)
-        
-        if arr.ndim == 2 and arr.size > 0:
-            T, N = arr.shape
-            max_paths = min(50, N)
-            path_indices = np.random.choice(N, max_paths, replace=False) if N > max_paths else np.arange(N)
-            
-            paths_added = 0
-            time_axis = np.arange(T)
-            
-            for i, path_idx in enumerate(path_indices):
-                try:
-                    path_values = arr[:, path_idx]
-                    
-                    if path_values.size < 2 or not np.isfinite(path_values).any():
-                        continue
-                    
-                    valid_values = path_values[np.isfinite(path_values)]
-                    if np.all(valid_values == valid_values[0]):
-                        continue
-
-                    opacity = max(0.1, min(0.3, 20.0 / max_paths))
-                    color_rgba = f'rgba(100,149,237,{opacity})'
-                    first = (i == 0)
-                    fig.add_trace(go.Scatter(
-                        x=time_axis, y=path_values, mode='lines',
-                        line={'color': color_rgba, 'width': 1},
-                        name='MC Simulation' if first else None, showlegend=first,
-                        hovertemplate="Day: %{x}<br>Return: %{y:.2f}%<extra></extra>"
-                    ), row=2, col=1)
-                    paths_added += 1
-                    
-                except Exception:
-                    continue
-            
-            return paths_added > 0
-    except Exception:
-        return False
-
-    return False
-
-
-def _plot_from_individual_simulations(fig: go.Figure, simulations: list) -> bool:
-    """Plot simulation paths from individual simulation equity curves."""
-    max_paths = min(50, len(simulations))
-    sample_indices = np.linspace(0, len(simulations)-1, max_paths, dtype=int)
-    
-    paths_added = 0
-    for i, idx in enumerate(sample_indices):
-        try:
-            sim = simulations[idx]
-            if not isinstance(sim, dict):
-                continue
-                
-            equity_curve = sim.get('equity_curve', sim.get('portfolio_value', sim.get('value', None)))
-            if equity_curve is None or len(equity_curve) == 0:
-                continue
-            
-            eq_array = np.asarray(equity_curve, dtype=float)
-            if eq_array.size < 2:
-                continue
-            
-            valid_mask = np.isfinite(eq_array) & (eq_array != 0)
-            if not valid_mask.any():
-                continue
-            
-            first_valid_idx = np.where(valid_mask)[0][0]
-            start_value = eq_array[first_valid_idx]
-            normalized_curve = ((eq_array / start_value) - 1.0) * 100.0
-            
-            if not np.isfinite(normalized_curve).any():
-                continue
-            
-            time_axis = np.arange(len(normalized_curve))
-            opacity = max(0.1, min(0.3, 20.0 / max_paths))
-            
-            fig.add_trace(go.Scatter(
-                x=time_axis, y=normalized_curve, mode='lines',
-                line={'color': f'rgba(100,149,237,{opacity})', 'width': 1},
-                name='MC Simulation' if i == 0 else None, showlegend=(i == 0),
-                hovertemplate="Day: %{x}<br>Return: %{y:.2f}%<extra></extra>"
-            ), row=2, col=1)
-            paths_added += 1
-            
-        except Exception:
-            continue
-    
-    return paths_added > 0
-
-
-def _add_strategy_overlay(fig: go.Figure, statistics: dict) -> None:
-    """Add strategy equity curve overlay if available."""
-    strategy_equity = statistics.get('strategy_equity_curve', [])
-    if strategy_equity and len(strategy_equity) > 1:
-        try:
-            se = np.asarray(strategy_equity, dtype=float)
-            if se.size > 1 and np.isfinite(se[0]) and se[0] != 0:
-                strat_norm = (se / se[0] - 1.0) * 100.0
-                time_axis = np.arange(len(strat_norm))
-                
-                fig.add_trace(go.Scatter(
-                    x=time_axis, y=strat_norm, mode='lines',
-                    line={'color': 'red', 'width': 3}, name='Your Strategy', showlegend=True,
-                    hovertemplate="Day: %{x}<br>Strategy Return: %{y:.2f}%<extra></extra>"
-                ), row=2, col=1)
-        except Exception:
-            pass
-
 
 def _add_simulation_paths(fig: go.Figure, simulations: list, mc_results: Optional[Dict[str, Any]] = None):
     """Add simulation paths panel using path_matrix from Monte Carlo results."""
@@ -477,31 +357,6 @@ def _add_simulation_paths(fig: go.Figure, simulations: list, mc_results: Optiona
             ), row=2, col=1)
 
 
-def _add_performance_comparison(fig: go.Figure, statistics: dict):
-    """Add performance comparison panel."""
-    actual = statistics.get('actual_return', 0)
-    mean_random = statistics.get('mean_return', 0)
-    
-    fig.add_trace(go.Bar(
-        x=['Strategy', 'Random Mean'],
-        y=[actual, mean_random],
-        marker_color=['red', 'lightgray']
-    ), row=2, col=2)
-
-
-def _print_mc_summary(statistics: dict):
-    """Print Monte Carlo summary."""
-    print(f"\nMonte Carlo Summary:")
-    print(f"  Strategy Return: {statistics.get('actual_return', 0):.2f}%")
-    print(f"  Random Mean: {statistics.get('mean_return', 0):.2f}%")
-    print(f"  Random Std: {statistics.get('std_return', 0):.2f}%")
-    if isinstance(mc_results, dict):
-        path_matrix = mc_results.get('path_matrix', None)
-
-    _plot_simulation_paths(fig, simulations, path_matrix)
-    _add_strategy_overlay(fig, mc_results.get('statistics', {}) if mc_results else {})
-
-
 def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
     """Add performance comparison subplot to Monte Carlo plot."""
     mean_random = statistics.get('mean_return', 0.0)
@@ -515,8 +370,9 @@ def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
     categories = ['Random\nMean', 'Strategy', 'Random\n+1σ', 'Random\n-1σ']
     colors = ['lightgray', 'red', 'lightgreen', 'orange']
 
-    for i, (category, val, color) in enumerate(zip(categories, values, colors)):
-        showlegend = i < 2
+    # Add all bar traces in a loop
+    bar_configs = zip(categories, values, colors, [True, True, False, False])
+    for category, val, color, showlegend in bar_configs:
         text_position = 'outside' if abs(val) < 1 else 'inside'
         text_color = 'white' if text_position == 'inside' else color
 
@@ -562,13 +418,20 @@ def _print_mc_summary(statistics: dict) -> None:
     mean_random = statistics.get('mean_return', 0)
     std_random = statistics.get('std_return', 0)
     
-    print(f"   Strategy Return: {actual_return:.3f}%" if actual_return else "   No strategy return available")
+    # Print strategy return info
+    if actual_return:
+        print(f"   Strategy Return: {actual_return:.3f}%")
+    else:
+        print("   No strategy return available")
+        
     print(f"   Random Mean: {mean_random:.3f}% ± {std_random:.3f}%")
     print(f"   Random Range: [{mean_random - std_random:.3f}%, {mean_random + std_random:.3f}%]")
     
+    # Print performance comparison
     if actual_return is not None and mean_random is not None:
         outperformance = actual_return - mean_random
-        print(f"   Performance vs Random: {outperformance:+.3f}% ({'Better' if outperformance > 0 else 'Worse'})")
+        performance_desc = 'Better' if outperformance > 0 else 'Worse'
+        print(f"   Performance vs Random: {outperformance:+.3f}% ({performance_desc})")
         
     print("   Parameter Sensitivity: Visualized in subplot 2")
 
@@ -612,23 +475,24 @@ def _plot_single_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]
 
     fig = make_subplots(rows=rows, cols=cols, subplot_titles=subplot_titles)
 
-    traces = [
-        (window_nums, train_returns, 'Train Returns', 1, 1),
-        (window_nums, test_returns, 'Test Returns', 1, 1),
-        (window_nums, train_sharpes, 'Train Sharpe', 1, 2),
-        (window_nums, test_sharpes, 'Test Sharpe', 1, 2),
-        (train_returns, test_returns, 'Returns Correlation', 2, 1),
-        (train_sharpes, test_sharpes, 'Sharpe Correlation', 2, 2)
+    # Add line/point traces
+    trace_configs = [
+        (window_nums, train_returns, 'Train Returns', 1, 1, 'lines+markers'),
+        (window_nums, test_returns, 'Test Returns', 1, 1, 'lines+markers'),
+        (window_nums, train_sharpes, 'Train Sharpe', 1, 2, 'lines+markers'),
+        (window_nums, test_sharpes, 'Test Sharpe', 1, 2, 'lines+markers'),
+        (train_returns, test_returns, 'Returns Correlation', 2, 1, 'markers'),
+        (train_sharpes, test_sharpes, 'Sharpe Correlation', 2, 2, 'markers')
     ]
 
-    for x, y, name, row, col in traces:
-        mode = 'markers' if 'Correlation' in name else 'lines+markers'
+    for x, y, name, row, col, mode in trace_configs:
         showlegend = 'Sharpe' not in name or 'Train' in name
         fig.add_trace(go.Scatter(x=x, y=y, mode=mode, name=name, showlegend=showlegend), row=row, col=col)
 
     _add_diagonal_lines(fig, train_returns, test_returns, 2, 1)
     _add_diagonal_lines(fig, train_sharpes, test_sharpes, 2, 2)
 
+    # Add rolling sharpe traces if available
     if has_rolling and rows > 2:
         if rolling_sharpe_train:
             fig.add_trace(go.Scatter(y=rolling_sharpe_train, mode='lines', name='Rolling Sharpe (Train)'), row=3, col=1)
@@ -687,6 +551,7 @@ def _plot_asset_returns(fig: go.Figure, windows: list, asset_names: list,
         train_returns = [w.get('asset_results', {}).get(asset, {}).get('train_return', 0) for w in windows]
         test_returns = [w.get('asset_results', {}).get(asset, {}).get('test_return', 0) for w in windows]
 
+        # Add traces for train and test returns
         fig.add_trace(go.Scatter(
             x=window_nums, y=train_returns, mode='lines+markers',
             name=f'{asset} Train', line={"color": color, "width": 2}
@@ -697,6 +562,7 @@ def _plot_asset_returns(fig: go.Figure, windows: list, asset_names: list,
             name=f'{asset} Test', line={"color": color, "width": 2, "dash": "dash"}
         ), row=1, col=2)
 
+        # Add scatter plot for train vs test comparison
         fig.add_trace(go.Scatter(
             x=train_returns, y=test_returns, mode='markers',
             name=f'{asset}', marker={"color": color, "size": 8}, showlegend=False
@@ -736,6 +602,7 @@ def _add_diagonal_lines(fig, x_data, y_data, row, col) -> None:
         line={'dash': 'dash', 'color': 'gray'}, name='Perfect Correlation', showlegend=False
     ), row=row, col=col)
 
+
 def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
     """Create default vs optimized comparison plot."""
     try:
@@ -746,20 +613,19 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
             return {"success": False, "reason": "missing_stats"}
 
         metrics_names = ['Total Return (%)', 'Sharpe Ratio', 'Max Drawdown (%)', 'Win Rate (%)', 'Total Trades']
-        default_values = [
-            float(default_stats.get('Total Return [%]', 0)),
-            float(default_stats.get('Sharpe Ratio', 0)),
-            float(default_stats.get('Max Drawdown [%]', 0)),
-            float(default_stats.get('Win Rate [%]', 0)),
-            int(default_stats.get('Total Trades', 0))
-        ]
-        optimized_values = [
-            float(optimized_stats.get('Total Return [%]', 0)),
-            float(optimized_stats.get('Sharpe Ratio', 0)),
-            float(optimized_stats.get('Max Drawdown [%]', 0)),
-            float(optimized_stats.get('Win Rate [%]', 0)),
-            int(optimized_stats.get('Total Trades', 0))
-        ]
+        
+        # Extract values using a helper function
+        def extract_values(stats, keys):
+            return [
+                float(stats.get(keys[0], 0)),  # Total Return
+                float(stats.get(keys[1], 0)),  # Sharpe Ratio
+                float(stats.get(keys[2], 0)),  # Max Drawdown
+                float(stats.get(keys[3], 0)),  # Win Rate
+                int(stats.get(keys[4], 0))     # Total Trades
+            ]
+        
+        default_values = extract_values(default_stats, ['Total Return [%]', 'Sharpe Ratio', 'Max Drawdown [%]', 'Win Rate [%]', 'Total Trades'])
+        optimized_values = extract_values(optimized_stats, ['Total Return [%]', 'Sharpe Ratio', 'Max Drawdown [%]', 'Win Rate [%]', 'Total Trades'])
 
         fig = go.Figure()
         
@@ -810,8 +676,25 @@ def _extract_stats_from_results(results: Dict[str, Any], key: str) -> Optional[d
                     return portfolio.stats()
     return None
 
+def _extract_portfolios_from_results(results: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract portfolios from results structure."""
+    portfolios = {}
+    
+    if 'default_backtest' in results:
+        for symbol, timeframes in results['default_backtest'].items():
+            for timeframe, portfolio in timeframes.items():
+                if hasattr(portfolio, 'stats'):
+                    portfolios[f"{symbol}_{timeframe}_default"] = portfolio
 
-def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
+    if 'full_backtest' in results:
+        for symbol, timeframes in results['full_backtest'].items():
+            for timeframe, portfolio in timeframes.items():
+                if hasattr(portfolio, 'stats'):
+                    portfolios[f"{symbol}_{timeframe}_optimized"] = portfolio
+    
+    return portfolios
+
+def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]: #keep this ; used in main.py
     """Create enhanced visualizations with consolidated logic."""
     try:
         portfolios = _extract_portfolios_from_results(results)
@@ -837,21 +720,3 @@ def create_visualizations(results: Dict[str, Any], strategy_name: str) -> Dict[s
     except Exception as e:
         print(f"Visualization failed: {e}")
         return {"success": False, "error": str(e)}
-
-def _extract_portfolios_from_results(results: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract portfolios from results structure."""
-    portfolios = {}
-    
-    if 'default_backtest' in results:
-        for symbol, timeframes in results['default_backtest'].items():
-            for timeframe, portfolio in timeframes.items():
-                if hasattr(portfolio, 'stats'):
-                    portfolios[f"{symbol}_{timeframe}_default"] = portfolio
-
-    if 'full_backtest' in results:
-        for symbol, timeframes in results['full_backtest'].items():
-            for timeframe, portfolio in timeframes.items():
-                if hasattr(portfolio, 'stats'):
-                    portfolios[f"{symbol}_{timeframe}_optimized"] = portfolio
-    
-    return portfolios

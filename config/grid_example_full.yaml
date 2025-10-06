@@ -1,0 +1,131 @@
+# Grid Trading Strategy - Complete Configuration Example
+# This file shows all possible configuration options
+
+# =============================================================================
+# STRATEGY PARAMETERS (Default values used when not optimizing)
+# =============================================================================
+parameters:
+  # Core Grid Parameters
+  grid_k: 1.03              # Grid spacing factor (geometric progression)
+  grid_n: 15                # Number of grid levels
+  
+  # Trading Parameters
+  initial_cash: 10000       # Initial capital
+  fee: 0.0008              # Trading fee (0.08% for Binance)
+  freq: "1H"               # Data frequency for VectorBT
+  
+  # Optional Parameters
+  max_position_size: 0.2    # Maximum position size (20% of portfolio)
+  risk_per_trade: 0.02      # Risk per trade (2%)
+
+# =============================================================================
+# OPTIMIZATION GRID (Parameter ranges for optimization)
+# =============================================================================
+optimization_grid:
+  grid_k: [1.01, 1.02, 1.03, 1.05, 1.07]    # Grid spacing factors to test
+  grid_n: [10, 15, 20, 25, 30]               # Grid level counts to test
+
+# =============================================================================
+# DATA SOURCE CONFIGURATIONS
+# =============================================================================
+
+# Option 1: CSV Data Source
+data_source: "csv"
+csv_path: ["data/BTCUSDT_1h_recent.csv"]
+
+# Option 2: CCXT Exchange Data (Live/Recent Data)
+# data_source: "ccxt"
+# ccxt:
+#   exchange: "binance"           # Exchange name (binance, coinbase, kraken, etc.)
+#   symbols: ["BTC/USDC:USDC"]    # Trading pairs to load
+#   sandbox: false                # Use sandbox/testnet (true/false)
+#   api_key: null                 # API key (optional, for private data)
+#   api_secret: null              # API secret (optional)
+
+# Option 3: Freqtrade Data
+# data_source: "freqtrade"
+# freqtrade_data_dir: "/path/to/freqtrade/user_data/data/binance"
+# symbols: ["BTC/USDT", "ETH/USDT"]
+
+# =============================================================================
+# DATA REQUIREMENTS
+# =============================================================================
+data_requirements:
+  columns: ["open", "high", "low", "close", "volume"]
+  min_periods: 100              # Minimum data points required
+  timeframe: "1H"               # Primary timeframe
+  required_timeframes: ["1h"]   # List of required timeframes
+
+# =============================================================================
+# ANALYSIS SETTINGS
+# =============================================================================
+analysis_settings:
+  # Optimization Settings
+  max_combinations: 50          # Maximum parameter combinations to test
+  optimization_metric: "sharpe" # Metric to optimize (sharpe, return, calmar)
+  
+  # Walk-Forward Analysis
+  walk_forward_windows: 5       # Number of walk-forward windows
+  train_ratio: 0.7             # Training data ratio (70%)
+  
+  # Monte Carlo Settings
+  monte_carlo_runs: 1000       # Number of Monte Carlo simulations
+  confidence_level: 0.95       # Confidence level for statistics
+
+# =============================================================================
+# RISK MANAGEMENT
+# =============================================================================
+risk_management:
+  max_drawdown_limit: 0.20     # Maximum allowed drawdown (20%)
+  stop_loss_pct: 0.05          # Stop loss percentage (5%)
+  take_profit_pct: 0.10        # Take profit percentage (10%)
+  position_sizing: "fixed"      # Position sizing method (fixed, volatility, kelly)
+
+# =============================================================================
+# PLOTTING SETTINGS
+# =============================================================================
+plotting:
+  show_trades: true            # Show trade markers on plots
+  show_grid_levels: true       # Show grid levels (strategy specific)
+  plot_indicators: true        # Plot technical indicators
+  save_plots: true            # Save plots to files
+  plot_format: "html"         # Plot format (html, png, pdf)
+
+# =============================================================================
+# METADATA
+# =============================================================================
+description: "Dynamic Grid Trading Strategy with geometric level spacing and automatic grid resets"
+version: "1.0"
+author: "Trading System"
+created: "2025-01-22"
+tags: ["grid", "crypto", "automated", "geometric"]
+
+# Strategy-specific notes
+notes: |
+  This grid strategy works best in:
+  - Sideways/ranging markets
+  - High volatility crypto pairs
+  - Markets with mean reversion tendencies
+  
+  Avoid using in:
+  - Strong trending markets
+  - Low volatility periods
+  - During major news events
+
+# =============================================================================
+# ADVANCED SETTINGS (Optional)
+# =============================================================================
+advanced:
+  # Grid Reset Conditions
+  reset_on_upper_breach: true   # Reset grid when price breaks upper level
+  reset_on_lower_breach: true   # Reset grid when price breaks lower level
+  profit_reinvestment: true     # Reinvest profits into new grid
+  
+  # Performance Filters
+  min_sharpe_ratio: 0.5        # Minimum Sharpe ratio to consider valid
+  min_win_rate: 0.4            # Minimum win rate (40%)
+  max_trades_per_day: 10       # Maximum trades per day limit
+  
+  # Execution Settings
+  slippage: 0.001              # Expected slippage (0.1%)
+  latency_ms: 100              # Expected execution latency

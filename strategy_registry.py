@@ -6,7 +6,7 @@ Automatically finds and loads strategies without manual registration.
 import os
 import importlib
 import inspect
-from typing import Dict, List, Callable, Any
+from typing import Dict, List, Any
 
 
 def _discover_strategies():
@@ -25,10 +25,9 @@ def _discover_strategies():
                 # Import the strategy module
                 module = importlib.import_module(f'strategies.{strategy_name}')
                 
-                # Look for create_X_portfolio function
-                portfolio_func_name = f'create_{strategy_name}_portfolio'
-                if hasattr(module, portfolio_func_name):
-                    portfolio_func = getattr(module, portfolio_func_name)
+                # Look for generic create_portfolio function
+                if hasattr(module, 'create_portfolio'):
+                    portfolio_func = getattr(module, 'create_portfolio')
                     
                     # Get default parameters from function signature or docstring
                     default_params = _extract_default_params(portfolio_func)
@@ -94,11 +93,14 @@ def get_available_strategies() -> List[str]:
 
 def create_portfolio(strategy_name: str, data, params: Dict[str, Any] = None):
     """Create a portfolio for any strategy."""
-    if strategy_name not in _STRATEGIES:
-        available = list(_STRATEGIES.keys())
-        raise ValueError(f"Unknown strategy: {strategy_name}. Available: {available}")
+    # Extract base strategy name (remove config suffixes like _ccxt, _freqtrade)
+    base_strategy_name = strategy_name.split('_')[0]
     
-    strategy_info = _STRATEGIES[strategy_name]
+    if base_strategy_name not in _STRATEGIES:
+        available = list(_STRATEGIES.keys())
+        raise ValueError(f"Unknown strategy: {base_strategy_name} (from {strategy_name}). Available: {available}")
+    
+    strategy_info = _STRATEGIES[base_strategy_name]
     portfolio_func = strategy_info['portfolio_func']
     
     if params is None:

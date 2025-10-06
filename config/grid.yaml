@@ -1,0 +1,31 @@
+# Grid Trading Strategy Configuration
+
+# Default strategy parameters (optimized)
+parameters:
+  grid_k: 1.03          # Grid spacing factor (optimized: best Sharpe 2.012)
+  grid_n: 15            # Number of grid levels (optimized: 16.98% return)
+  initial_cash: 10000   # Initial capital
+  fee: 0.0008          # Trading fee (0.08%)
+  freq: "1h"           # Data frequency (lowercase to avoid deprecation)
+
+# Optimization grid for parameter tuning
+optimization_grid:
+  grid_k: [1.01, 1.02, 1.03, 1.05]
+  grid_n: [10, 15, 20, 25]
+
+# Data requirements
+data_requirements:
+  columns: ["open", "high", "low", "close", "volume"]
+  min_periods: 100
+  timeframe: "1H"
+  required_timeframes: ["1h"]
+
+# CCXT configuration for BTC/USDT (recent data)
+data_source: "ccxt"
+ccxt:
+  exchange: "binance"
+  symbols: ["BTC/USDT"]
+  sandbox: false
+
+# Strategy description
+description: "Dynamic Grid Trading Strategy with geometric level spacing and automatic grid resets"

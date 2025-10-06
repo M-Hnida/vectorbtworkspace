@@ -1,0 +1,41 @@
+# Supertrend with Grid Strategy Configuration
+
+name: "Supertrend Grid"
+version: "1.0"
+description: "Supertrend trend following strategy with grid-based exit mechanism"
+
+# Strategy Parameters
+parameters:
+  st_period: 10
+  st_multiplier: 3.0
+  grid_levels: 5
+  grid_range: 0.05
+  initial_cash: 10000
+  fee: 0.001
+  freq: "1h"
+
+# Data Requirements
+required_timeframes:
+  - "1h"
+
+# Symbols (can be overridden at runtime)
+symbols:
+  - "BTCUSD"
+
+# Data Source Configuration
+data_source: "csv"
+csv_path: 
+  - "data/BTCUSD_1h_2011-2025.csv"
+
+# Optimization Grid
+optimization_grid:  
+  st_period: [7, 10, 14, 21]
+  st_multiplier: [1.0, 2.0, 3.0, 4.0]
+  grid_levels: [3, 5, 7, 10]
+  grid_range: [0.02, 0.05, 0.08, 0.10]
+
+# Plotting Configuration
+plotting:
+  template: "plotly_dark"
+  show_volume: false
+  show_grid: true

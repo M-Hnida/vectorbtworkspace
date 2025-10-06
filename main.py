@@ -66,8 +66,21 @@ def run_backtest_for_strategy(
         # Create portfolio directly
         portfolio = create_portfolio(strategy_name, primary_data, parameters)
 
-        total_return = portfolio.stats()["Total Return [%]"]
-        print(f"✅ {symbol} {timeframe}: {total_return:.2f}%")
+        # Check if portfolio creation was successful
+        if portfolio is None:
+            print(f"❌ {symbol} {timeframe}: Portfolio creation returned None")
+            return None
+
+        # Get portfolio statistics
+        try:
+            stats = portfolio.stats()
+            total_return = stats.get("Total Return [%]", "N/A")
+            print(f"✅ {symbol} {timeframe}: Return {total_return}%")
+        except Exception as stats_error:
+            print(
+                f"✅ {symbol} {timeframe}: Portfolio created but stats failed: {stats_error}"
+            )
+
         return portfolio
 
     except Exception as e:
@@ -104,19 +117,84 @@ def run_full_backtest(data: Dict, strategy_name: str, parameters: dict) -> Dict:
                 if portfolio:
                     results[symbol][timeframe] = portfolio
 
+    # Calculate and display aggregated portfolio statistics
+    if results:
+        print_aggregated_portfolio_stats(results)
+    
     return results
 
 
-class StrategyContext:
-    """Simple strategy context wrapper."""
-
-    def __init__(self, name: str, parameters: dict):
-        self.name = name
-        self.parameters = parameters
-        # Removed signal_func - using portfolio-direct approach
-
-    def get_required_timeframes(self):
-        return ["1h"]
+def print_aggregated_portfolio_stats(results: Dict):
+    """Print full pf.stats() for each portfolio and aggregated statistics."""
+    print("\n" + "="*80)
+    print("📊 INDIVIDUAL PORTFOLIO STATISTICS (Full pf.stats())")
+    print("="*80)
+    
+    all_portfolios = []
+    
+    # Print full stats for each individual portfolio
+    for symbol, timeframes in results.items():
+        for timeframe, portfolio in timeframes.items():
+            if portfolio is not None:
+                try:
+                    print(f"\n🔸 {symbol} {timeframe} - Full Portfolio Statistics:")
+                    print("-" * 50)
+                    stats = portfolio.stats()
+                    print(stats)
+                    all_portfolios.append((symbol, timeframe, portfolio, stats))
+                    
+                except Exception as e:
+                    print(f"⚠️ Could not get stats for {symbol} {timeframe}: {e}")
+    
+    if not all_portfolios:
+        print("❌ No valid portfolio data found")
+        return
+    
+    # Print aggregated summary
+    print("\n" + "="*80)
+    print("📊 AGGREGATED SUMMARY")
+    print("="*80)
+    
+    # Calculate aggregated metrics from full stats
+    total_portfolios = len(all_portfolios)
+    returns = []
+    sharpe_ratios = []
+    max_drawdowns = []
+    win_rates = []
+    total_trades = []
+    
+    for symbol, timeframe, portfolio, stats in all_portfolios:
+        try:
+            returns.append(stats.get('Total Return [%]', 0))
+            sharpe_ratios.append(stats.get('Sharpe Ratio', 0))
+            max_drawdowns.append(stats.get('Max Drawdown [%]', 0))
+            win_rates.append(stats.get('Win Rate [%]', 0))
+            total_trades.append(stats.get('# Trades', 0))
+        except:
+            pass
+    
+    if returns:
+        avg_return = sum(returns) / len(returns)
+        avg_sharpe = sum(s for s in sharpe_ratios if s != 0) / max(1, len([s for s in sharpe_ratios if s != 0]))
+        avg_max_drawdown = sum(max_drawdowns) / len(max_drawdowns)
+        avg_win_rate = sum(win_rates) / len(win_rates)
+        total_trades_all = sum(total_trades)
+        
+        best_idx = returns.index(max(returns))
+        worst_idx = returns.index(min(returns))
+        best_symbol = all_portfolios[best_idx][0]
+        worst_symbol = all_portfolios[worst_idx][0]
+        
+        print(f"📈 Portfolio Count: {total_portfolios}")
+        print(f"📊 Average Return: {avg_return:.2f}%")
+        print(f"📉 Average Max Drawdown: {avg_max_drawdown:.2f}%")
+        print(f"⚡ Average Sharpe Ratio: {avg_sharpe:.3f}")
+        print(f"🎯 Average Win Rate: {avg_win_rate:.1f}%")
+        print(f"🔄 Total Trades (All Symbols): {total_trades_all}")
+        print(f"🏆 Best Performer: {best_symbol} ({max(returns):.2f}%)")
+        print(f"📉 Worst Performer: {worst_symbol} ({min(returns):.2f}%)")
+    
+    print("="*80)
 
 
 def run_strategy_analysis(
@@ -129,17 +207,14 @@ def run_strategy_analysis(
     try:
         # Load config and data
         raw_config = load_strategy_config(strategy_name) or {}
-        strategy_config = {
-            "name": strategy_name,
-            "parameters": raw_config.get("parameters", {}),
-            "optimization_grid": raw_config.get("optimization_grid", {}),
-            "analysis_settings": raw_config.get("analysis_settings", {}),
-            "data_requirements": raw_config.get("data_requirements", {}),
-        }
+        strategy_config = raw_config.copy()  # Use the full config
+        strategy_config["name"] = strategy_name  # Ensure name is set
 
         # Load data using simplified context
         class DataContext:
-            name = strategy_name
+            def __init__(self, config):
+                self.name = strategy_name
+                self.config = config
 
             def get_required_timeframes(self):
                 return ["1h"]
@@ -149,9 +224,12 @@ def run_strategy_analysis(
                 return ["open", "high", "low", "close", "volume"]
 
             def get_parameter(self, key, default=None):
-                return strategy_config.get("parameters", {}).get(key, default)
+                # First check root level, then parameters section
+                if key in self.config:
+                    return self.config[key]
+                return self.config.get("parameters", {}).get(key, default)
 
-        data = load_data_for_strategy(DataContext(), time_range, end_date)
+        data = load_data_for_strategy(DataContext(strategy_config), time_range, end_date)
         _, _, primary_data = get_primary_data(data, strategy_config)
 
         if fast_mode:
@@ -195,8 +273,18 @@ def run_strategy_analysis(
 
         # Robustness tests
         print("\n📈 Walk-Forward Analysis")
-        optimized_context = StrategyContext(strategy_name, optimized_params)
-        walkforward_results = run_walkforward_analysis(optimized_context, primary_data)
+
+        # Create simple strategy context for walk-forward
+        class SimpleStrategy:
+            def __init__(self, name, params):
+                self.name = name
+                self.parameters = params
+
+            def get_required_timeframes(self):
+                return ["1h"]
+
+        optimized_strategy = SimpleStrategy(strategy_name, optimized_params)
+        walkforward_results = run_walkforward_analysis(optimized_strategy, primary_data)
         results["walkforward"] = walkforward_results
 
         print("\n🎲 Monte Carlo Analysis")

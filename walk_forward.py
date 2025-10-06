@@ -4,7 +4,7 @@ Walk-Forward Analysis - Simple and Practical Implementation
 """
 
 import pandas as pd
-# Removed unused import - using strategy_registry now
+
 from typing import Dict, Any
 import vectorbt as vbt
 
@@ -36,9 +36,8 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
             train_data = data.iloc[i:train_end]
             test_data = data.iloc[train_end:test_end]
             
-            # Generate signals and run backtests for both periods
+            # Run backtests for both periods
             try:
-                primary_tf = strategy.get_required_timeframes()[0]
                 # Train period
                 train_portfolio = create_portfolio(strategy.name, train_data, strategy.parameters)
                 train_stats = train_portfolio.stats()
@@ -105,9 +104,17 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
         test_returns = [w['test_stats']['Total Return [%]'] for w in windows]
         avg_oos_performance = sum(test_returns) / len(test_returns)
         
+        # Calculate cumulative return across all test periods
+        # This simulates what would happen if we traded the strategy sequentially
+        cumulative_return = 1.0
+        for ret in test_returns:
+            cumulative_return *= (1 + ret / 100)
+        total_cumulative_return = (cumulative_return - 1) * 100
+        
         return {
             'windows': windows,
             'avg_oos_performance': avg_oos_performance,
+            'total_cumulative_return': total_cumulative_return,
             'parameter_stability': 'stable',  # Simplified for now
             'summary': f"Completed {len(windows)} walk-forward windows, avg OOS return: {avg_oos_performance:.2f}%"
         }
