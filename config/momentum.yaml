@@ -1,41 +1,15 @@
 parameters:
-  # Volatility momentum parameters
-  vol_momentum_window: 20
-  vol_momentum_threshold: 0.0
-  vol_std_window: 20
-  
-  # WMA trend alignment
-  wma_length: 50
-  
-  # ATR-based stop loss
-  atr_length: 14
-  atr_mult: 2.0
-  
-  # Profit target (percentage)
-  profit_target_percent: 0.02  # 2%
-  
-  # Trailing stop (percentage)
-  trailing_stop_percent: 0.01  # 1%
-  
-  # Timeframe settings
+  roc_period: 10              # Period for rate of change calculation
+  roc_threshold: 0.005        # 0.5% threshold (adjusted for forex)
+  sma_period: 20              # Simple moving average period
+  stop_loss: 0.02             # 2% stop loss (used in portfolio)
+  take_profit: 0.04           # 4% take profit (used in portfolio)
   primary_timeframe: "1h"
-  required_timeframes: ["1h"]
 
-# Data requirements
 csv_path:
   - "data/EURUSD_1H_2009-2025.csv"
 
-# Optimization grid for parameter tuning
 optimization_grid:
-  vol_momentum_window: [15, 20, 25]
-  vol_momentum_threshold: [0.0, 0.1, 0.2]
-  wma_length: [30, 50, 70]
-  atr_mult: [1.5, 2.0, 2.5]
-  profit_target_percent: [0.015, 0.02, 0.025]
-  trailing_stop_percent: [0.008, 0.01, 0.012]
-
-# Analysis settings
-analysis_settings:
-  plot_signals: true
-  show_trades: true
-  calculate_metrics: true
+  roc_period: [5, 20, 5]
+  roc_threshold: [0.002, 0.01, 0.002]
+  sma_period: [10, 50, 10]

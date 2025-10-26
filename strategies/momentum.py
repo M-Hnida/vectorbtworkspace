@@ -1,11 +1,11 @@
 """Simple momentum strategy based on price rate of change and moving average."""
 
-from typing import Dict
+from typing import Dict, Optional
 import pandas as pd
 import vectorbt as vbt
 
 
-def create_portfolio(data: pd.DataFrame, params: Dict = None) -> "vbt.Portfolio":
+def create_portfolio(data: pd.DataFrame, params: Optional[Dict] = None) -> "vbt.Portfolio":
     """Create momentum strategy portfolio directly."""
     if params is None:
         params = {}
@@ -36,11 +36,11 @@ def create_portfolio(data: pd.DataFrame, params: Dict = None) -> "vbt.Portfolio"
     long_exits = (roc <= 0) | ~uptrend
     short_exits = (roc >= 0) | ~downtrend
 
-    # Convert to boolean series
-    long_entries = pd.Series(long_entries, index=data.index).fillna(False).astype(bool)
-    short_entries = pd.Series(short_entries, index=data.index).fillna(False).astype(bool)
-    long_exits = pd.Series(long_exits, index=data.index).fillna(False).astype(bool)
-    short_exits = pd.Series(short_exits, index=data.index).fillna(False).astype(bool)
+    # Ensure boolean series
+    long_entries = long_entries.fillna(False).astype(bool)
+    short_entries = short_entries.fillna(False).astype(bool)
+    long_exits = long_exits.fillna(False).astype(bool)
+    short_exits = short_exits.fillna(False).astype(bool)
 
     return vbt.Portfolio.from_signals(
         close=close,

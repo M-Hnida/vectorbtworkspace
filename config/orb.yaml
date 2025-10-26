@@ -1,41 +1,13 @@
-# ============================================================
-# Configuration for the Opening Range Breakout (ORB) Strategy
-# ============================================================
-name: "orb_strategy"
+# Opening Range Breakout (ORB) Strategy Configuration
 
-# ------------------------------------------------------------
-# Strategy Parameters
-# ------------------------------------------------------------
 parameters:
-  # Core ORB settings
-  orb_period: 30 # Opening range period in bars
-  breakout_threshold: 0.001 # Minimum range size for valid breakout
-  atr_multiple: 1.5 # ATR multiplier for stop loss/take profit
+  orb_period: 30                    # Opening range period in bars
+  breakout_threshold: 0.001         # Minimum range size for valid breakout
 
-  # Multi-timeframe settings
-  required_timeframes: ["15m","1h"]
-
-# ------------------------------------------------------------
-# Optimization Parameter Ranges
-# ------------------------------------------------------------
 optimization_grid:
-  orb_period: [15, 30, 45]
-  breakout_threshold: [0.0001, 0.001, 0.002]
-  atr_multiple: [1.0, 1.5, 2.0]
+  orb_period: [15, 45, 15]
+  breakout_threshold: [0.0001, 0.002, 0.001]
 
 csv_path:
   - "data/EURUSD_15m_2021-2025.csv"
   - "data/EURUSD_1H_2009-2025.csv"
-
-
-# ------------------------------------------------------------
-# Analysis Settings
-# ------------------------------------------------------------
-analysis_settings:
-  monte_carlo_runs: 50
-  # Optimization settings
-  optimization:
-    enable_parallel: false  # Disable parallel processing for ORB due to serialization issues
-    max_workers: 1
-    early_stopping: true
-    early_stopping_patience: 5

@@ -24,28 +24,24 @@ parameters:
   # Portfolio settings
   initial_cash: 10000
   fee: 0.001
-  max_position_size: 0.2
-  max_leverage: 3.0
   
   # Timeframe settings
   primary_timeframe: "1H"
 
 # Optimization grid for parameter tuning
 optimization_grid:
-  donchian_period: [20, 32, 40]
-  atr_period: [10, 13, 20]
-  atr_sma_period: [15, 16, 25]
-  ema_short_period: [40, 50, 60]
-  sma_long_period: [180, 204, 220]
-  adx_period: [10, 12, 20]
-  adx_threshold: [15, 20, 25]
-  volume_ma_period: [15, 19, 25]
-  atr_normalized_threshold: [0.005, 0.012, 0.015]
-  atr_sl_multiplier: [3.0, 5.1, 7.0]
-  atr_tp_multiplier: [8.0, 9.5, 12.0]
-  partial_tp_atr_multiplier: [3.0, 6.9, 7.0]
-  max_position_size: [0.1, 0.2, 0.3]
-  max_leverage: [1.0, 2.0, 3.0]
+  donchian_period: [20, 40, 10]
+  atr_period: [10, 20, 5]
+  atr_sma_period: [15, 25, 5]
+  ema_short_period: [40, 60, 10]
+  sma_long_period: [180, 220, 20]
+  adx_period: [10, 20, 5]
+  adx_threshold: [15, 25, 5]
+  volume_ma_period: [15, 25, 5]
+  atr_normalized_threshold: [0.005, 0.015, 0.005]
+  atr_sl_multiplier: [3.0, 7.0, 2.0]
+  atr_tp_multiplier: [8.0, 12.0, 2.0]
+  partial_tp_atr_multiplier: [3.0, 7.0, 2.0]
 
 # Data requirements
 data_requirements:

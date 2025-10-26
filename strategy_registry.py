@@ -1,12 +1,12 @@
 """
-Auto-Discovery Strategy System
+Auto-Discovery Strategy System.
 Automatically finds and loads strategies without manual registration.
 """
 
 import os
 import importlib
 import inspect
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 
 def _discover_strategies():
@@ -55,18 +55,10 @@ def _extract_default_params(func):
         params_param = sig.parameters.get('params')
         if params_param and params_param.default != inspect.Parameter.empty:
             return params_param.default
-    except:
+    except Exception:
         pass
     
-    # Try to call the function with None to get defaults
-    try:
-        # This is a bit hacky but works for our pattern
-        import pandas as pd
-        dummy_data = pd.DataFrame({'close': [100, 101, 102]})
-        # If it worked, the function handles None properly
-        return {}
-    except:
-        return {}
+    return {}
 
 
 def _extract_optimization_grid(module, strategy_name):
@@ -91,10 +83,14 @@ def get_available_strategies() -> List[str]:
     return list(_STRATEGIES.keys())
 
 
-def create_portfolio(strategy_name: str, data, params: Dict[str, Any] = None):
+def create_portfolio(strategy_name: str, data, params: Optional[Dict[str, Any]] = None):
     """Create a portfolio for any strategy."""
-    # Extract base strategy name (remove config suffixes like _ccxt, _freqtrade)
-    base_strategy_name = strategy_name.split('_')[0]
+    # First try the full strategy name
+    base_strategy_name = strategy_name
+    
+    # If not found, try extracting base name (remove config suffixes like _ccxt, _freqtrade)
+    if base_strategy_name not in _STRATEGIES:
+        base_strategy_name = strategy_name.split('_')[0]
     
     if base_strategy_name not in _STRATEGIES:
         available = list(_STRATEGIES.keys())
@@ -143,6 +139,39 @@ def get_default_parameters(strategy_name: str) -> Dict[str, Any]:
     return _STRATEGIES[strategy_name]['default_params']
 
 
+def strategy_needs_multi_timeframe(strategy_name: str) -> bool:
+    """Check if strategy expects multi-timeframe data (Dict) instead of single DataFrame."""
+    if strategy_name not in _STRATEGIES:
+        return False
+    
+    try:
+        import inspect
+        portfolio_func = _STRATEGIES[strategy_name]['portfolio_func']
+        sig = inspect.signature(portfolio_func)
+        
+        # Check first parameter type hint
+        params = list(sig.parameters.values())
+        if len(params) > 0:
+            first_param = params[0]
+            annotation = first_param.annotation
+            
+            # Check if it's Dict type hint
+            if hasattr(annotation, '__origin__'):
+                return annotation.__origin__ is dict
+            
+            # Check string annotation
+            if isinstance(annotation, str):
+                return 'Dict' in annotation or 'dict' in annotation.lower()
+        
+        # Fallback: check source code for tf_data parameter name
+        source = inspect.getsource(portfolio_func)
+        first_line = source.split('\n')[0]
+        return 'tf_data' in first_line or 'timeframes' in first_line
+        
+    except Exception:
+        return False
+
+
 def get_strategy_info() -> Dict[str, Dict]:
     """Get information about all discovered strategies."""
     info = {}
@@ -151,6 +180,7 @@ def get_strategy_info() -> Dict[str, Dict]:
             'name': name,
             'has_optimization_grid': bool(strategy['optimization_grid']),
             'num_parameters': len(strategy['optimization_grid']),
-            'default_params': strategy['default_params']
+            'default_params': strategy['default_params'],
+            'multi_timeframe': strategy_needs_multi_timeframe(name)
         }
     return info

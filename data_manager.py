@@ -5,27 +5,24 @@ Supports CSV, CCXT (Binance), and Freqtrade data sources.
 """
 
 import os
-from typing import Dict, List, Optional, Union
+import json
+import time
+from typing import Dict, List, Optional, Union, Any
 from datetime import datetime, timedelta
 import pandas as pd
 import yaml
-
-# Required imports
-import json
 import ccxt
-from typing import Any
 
-# Simple mappings
-TIMEFRAMES = {
-    "1m": "1T",
-    "5m": "5T",
-    "15m": "15T",
-    "30m": "30T",
-    "1h": "1H",
-    "4h": "4H",
-    "1d": "1D",
-    "1w": "1W",
-}
+# =============================================================================
+# DOMAIN CONSTANTS - Data Manager Module
+# These constants are specific to data loading and not used elsewhere
+# =============================================================================
+
+# CCXT exchange data fetching configuration
+CCXT_DEFAULT_LIMIT = 1000       # Default number of bars to fetch per request
+CCXT_BATCH_SIZE = 1000          # Bars per batch for large datasets
+CCXT_MAX_BATCHES = 5            # Maximum batches to fetch (prevents runaway requests)
+CCXT_RATE_LIMIT_DELAY = 0.1     # Seconds between requests (API rate limiting)
 
 
 def load_ohlc_csv(
@@ -547,6 +544,21 @@ def _harmonize_across_symbols(
     return harmonized
 
 
+def _extract_timeframe_from_filename(filename: str) -> Optional[str]:
+    """Extract timeframe from filename like EURUSD_1H_2009-2025.csv -> 1h"""
+    parts = os.path.basename(filename).split("_")
+    if len(parts) >= 2:
+        # Second part is usually the timeframe
+        tf = parts[1].lower()
+        # Normalize common formats
+        tf_map = {
+            '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '1d': '1d',
+            '15min': '15m', '30min': '30m', '1hour': '1h', '4hour': '4h', '1day': '1d'
+        }
+        return tf_map.get(tf, tf)
+    return None
+
+
 def _load_csv_files(
     csv_paths: List[str],
     required_timeframes: List[str],
@@ -566,21 +578,31 @@ def _load_csv_files(
         try:
             data: Dict[str, pd.DataFrame] = {}
 
-            # Map files to timeframes by position
-            if len(files) == 1 and required_timeframes:
-                timeframe = required_timeframes[0]
-                data[timeframe] = load_ohlc_csv(files[0])
-                print(
-                    f"✅ Loaded {timeframe} data from {files[0]} ({len(data[timeframe])} bars)"
-                )
-            else:
-                for idx, timeframe in enumerate(required_timeframes):
-                    if idx < len(files):
-                        file_path = files[idx]
-                        data[timeframe] = load_ohlc_csv(file_path)
-                        print(
-                            f"✅ Loaded {timeframe} data from {file_path} ({len(data[timeframe])} bars)"
-                        )
+            # Try to extract timeframe from filename first
+            for file_path in files:
+                tf_from_file = _extract_timeframe_from_filename(file_path)
+                if tf_from_file and tf_from_file in required_timeframes:
+                    data[tf_from_file] = load_ohlc_csv(file_path)
+                    print(
+                        f"✅ Loaded {tf_from_file} data from {file_path} ({len(data[tf_from_file])} bars)"
+                    )
+            
+            # Fallback: Map files to timeframes by position if extraction failed
+            if not data:
+                if len(files) == 1 and required_timeframes:
+                    timeframe = required_timeframes[0]
+                    data[timeframe] = load_ohlc_csv(files[0])
+                    print(
+                        f"✅ Loaded {timeframe} data from {files[0]} ({len(data[timeframe])} bars)"
+                    )
+                else:
+                    for idx, timeframe in enumerate(required_timeframes):
+                        if idx < len(files):
+                            file_path = files[idx]
+                            data[timeframe] = load_ohlc_csv(file_path)
+                            print(
+                                f"✅ Loaded {timeframe} data from {file_path} ({len(data[timeframe])} bars)"
+                            )
 
             if not data:
                 raise ValueError(f"No data loaded for {symbol}")
@@ -667,17 +689,17 @@ def _load_ccxt_data_internal(
                         elif timeframe == "1d":
                             limit = time_delta.days
                         else:
-                            limit = 1000  # Default fallback
+                            limit = CCXT_DEFAULT_LIMIT  # Default fallback
                     else:
-                        limit = 1000
+                        limit = CCXT_DEFAULT_LIMIT
                 else:
-                    limit = 1000  # Default when no time_range specified
+                    limit = CCXT_DEFAULT_LIMIT  # Default when no time_range specified
                 
                 print(f"🔍 Fetching {limit} bars for {symbol} {timeframe} (time_range: {time_range})")
                 
                 # Fetch OHLCV data - use Freqtrade-like approach for large datasets
                 try:
-                    if limit > 1000 and time_range:
+                    if limit > CCXT_DEFAULT_LIMIT and time_range:
                         print(f"📊 Large dataset requested ({limit} bars for {time_range})")
                         print(f"🔄 Using multi-batch approach like Freqtrade...")
                         ohlcv_data = _fetch_historical_data_batches(exchange, symbol, timeframe, limit)
@@ -690,8 +712,8 @@ def _load_ccxt_data_internal(
                         print(f"📊 Final dataset: {len(ohlcv_data)} bars (~{actual_days:.0f} days)")
                         
                 except Exception as fetch_error:
-                    print(f"❌ Failed to fetch with limit {limit}, trying with 1000: {fetch_error}")
-                    ohlcv_data = exchange.fetch_ohlcv(symbol, timeframe, limit=1000)
+                    print(f"❌ Failed to fetch with limit {limit}, trying with {CCXT_DEFAULT_LIMIT}: {fetch_error}")
+                    ohlcv_data = exchange.fetch_ohlcv(symbol, timeframe, limit=CCXT_DEFAULT_LIMIT)
 
                 if ohlcv_data:
                     # Convert to DataFrame
@@ -849,23 +871,23 @@ def _convert_freqtrade_config_internal(config_path: str) -> Dict[str, Any]:
 
 
 # Convenience functions for easy usage
-def load_binance_data(symbol="BTC/USDT", timeframe="1h", limit=1000, **kwargs):
+def load_binance_data(symbol: str = "BTC/USDT", timeframe: str = "1h", **kwargs) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Load data from Binance via CCXT."""
     return _load_ccxt_data_internal(
         exchange_name="binance", symbols=[symbol], timeframes=[timeframe], **kwargs
     )
 
 
-def import_freqtrade_config(config_path: str):
+def import_freqtrade_config(config_path: str) -> Dict[str, Any]:
     """Import Freqtrade configuration."""
     return _convert_freqtrade_config_internal(config_path)
 
 
-def copy_freqtrade_config(source_path: str, target_path: str):
+def copy_freqtrade_config(source_path: str, target_path: str) -> Dict[str, Any]:
     """Copy and convert Freqtrade config to YAML format."""
     ft_config = import_freqtrade_config(source_path)
 
-    with open(target_path, "w") as f:
+    with open(target_path, "w", encoding='utf-8') as f:
         yaml.dump(ft_config, f, default_flow_style=False)
 
     print(f"✅ Converted Freqtrade config to {target_path}")
@@ -895,45 +917,41 @@ def use_ccxt_data(exchange="binance", symbols=None, **kwargs):
     return load_ccxt_for_strategy
 
 
-def quick_binance_data(symbol="BTC/USDT", timeframe="1h", bars=1000):
+def quick_binance_data(symbol: str = "BTC/USDT", timeframe: str = "1h", bars: int = CCXT_DEFAULT_LIMIT) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Quick function to get Binance data without configuration."""
     return _load_ccxt_data_internal(
         exchange_name="binance",
         symbols=[symbol],
-        timeframes=[timeframe],
-        limit=bars
+        timeframes=[timeframe]
     )
 
 
-def switch_data_source(config_file: str, new_source: str):
+def switch_data_source(config_file: str, new_source: str) -> None:
     """Switch data source in a YAML config file."""
     if new_source not in ["csv", "ccxt", "freqtrade"]:
         raise ValueError("Data source must be 'csv', 'ccxt', or 'freqtrade'")
     
-    # Load existing config
-    with open(config_file, 'r') as f:
+    with open(config_file, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
-    # Update data source
     if 'parameters' not in config:
         config['parameters'] = {}
     config['parameters']['data_source'] = new_source
     
-    # Save updated config
-    with open(config_file, 'w') as f:
+    with open(config_file, 'w', encoding='utf-8') as f:
         yaml.dump(config, f, default_flow_style=False)
     
     print(f"✅ Updated {config_file} to use {new_source} data source")
-def _fetch_historical_data_batches(exchange, symbol: str, timeframe: str, total_limit: int):
+def _fetch_historical_data_batches(exchange, symbol: str, timeframe: str, total_limit: int) -> list:
     """
     Fetch historical data in batches like Freqtrade does.
     Makes multiple API calls to get more historical data.
     """
-    import time
+    # Use module-level domain constants defined at top of file
     
     all_data = []
-    batch_size = 1000  # Binance safe limit per request
-    batches_needed = min((total_limit // batch_size) + 1, 5)  # Limit to 5 batches max
+    batch_size = CCXT_BATCH_SIZE
+    batches_needed = min((total_limit // batch_size) + 1, CCXT_MAX_BATCHES)
     
     print(f"🔄 Fetching {batches_needed} batches of {batch_size} bars each...")
     
@@ -974,9 +992,9 @@ def _fetch_historical_data_batches(exchange, symbol: str, timeframe: str, total_
             if batch_data:
                 since = batch_data[0][0] - (batch_size * _get_timeframe_ms(timeframe))
             
-            # Rate limiting - be nice to Binance API
+            # Rate limiting - be nice to exchange API
             if batch < batches_needed - 1:
-                time.sleep(0.1)  # 100ms delay between requests
+                time.sleep(CCXT_RATE_LIMIT_DELAY)
                 
         except Exception as e:
             print(f" Error: {e}")
@@ -987,14 +1005,6 @@ def _fetch_historical_data_batches(exchange, symbol: str, timeframe: str, total_
 
 
 def _get_timeframe_ms(timeframe: str) -> int:
-    """Convert timeframe to milliseconds."""
-    timeframe_ms = {
-        '1m': 60 * 1000,
-        '5m': 5 * 60 * 1000,
-        '15m': 15 * 60 * 1000,
-        '30m': 30 * 60 * 1000,
-        '1h': 60 * 60 * 1000,
-        '4h': 4 * 60 * 60 * 1000,
-        '1d': 24 * 60 * 60 * 1000,
-    }
-    return timeframe_ms.get(timeframe, 60 * 60 * 1000)  # Default to 1h
+    """Convert timeframe string to milliseconds."""
+    from constants import TIMEFRAME_MS
+    return TIMEFRAME_MS.get(timeframe, TIMEFRAME_MS['1h'])

@@ -1,0 +1,38 @@
+# Bollinger Bands with Kalman Filter Strategy Configuration
+
+strategy_name: bollinger_kalman
+
+# Strategy parameters
+parameters:
+  period: 20                      # Bollinger Bands period
+  std_dev: 2                      # Standard deviation multiplier
+  process_variance: 0.00001       # Kalman filter process noise (1e-5)
+  measurement_variance: 0.1       # Kalman filter measurement noise (1e-1)
+
+# Parameter optimization grid (using [start, end, step] format)
+optimization_grid:
+  period: [10, 50, 10]
+  std_dev: [1.5, 3.0, 0.5]
+  process_variance: [0.00001, 0.001, 0.0001]
+  measurement_variance: [0.01, 1.0, 0.1]
+
+# Data requirements
+data_source: csv
+csv_path:
+  - "data/EURUSD_1H_2009-2025.csv"
+  
+# Optional: time range filtering
+# start_date: "2020-01-01"
+# end_date: "2024-12-31"
+
+# Backtesting settings
+backtesting:
+  initial_cash: 10000
+  fees: 0.001                     # 0.1% per trade
+  slippage: 0.0005                # 0.05%
+
+# Walk-forward analysis settings
+walk_forward:
+  train_period_days: 365          # 1 year training
+  test_period_days: 90            # 3 months testing
+  step_days: 30                   # Move forward 1 month each iteration

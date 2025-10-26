@@ -1,3 +1,5 @@
+"""Plotting utilities for trading strategy analysis."""
+
 import warnings
 from typing import Dict, Any, Optional
 import numpy as np
@@ -9,8 +11,6 @@ import vectorbt as vbt
 warnings.filterwarnings("ignore")
 vbt.settings.set_theme("dark")
 vbt.settings['plotting']['layout']["template"] = "plotly_dark"
-
-DEBUG = False
 
 
 def plot_comprehensive_analysis(portfolios: Dict[str, Any], strategy_name: str = "Trading Strategy",
@@ -148,6 +148,18 @@ def _add_histogram(fig: go.Figure, returns_data: list, statistics: dict) -> None
         )
 
 
+def _calculate_parameter_importance(param_names: list, param_data: dict, returns: pd.Series) -> list:
+    """Calculate parameter importance using Spearman correlation."""
+    scores = []
+    for name in param_names:
+        vals = pd.Series(param_data[name])
+        mask = ~(vals.isna() | returns.isna())
+        if mask.sum() >= 3:
+            corr = float(returns[mask].corr(vals[mask], method='spearman'))
+            scores.append((name, abs(corr)))
+    return scores
+
+
 def _extract_parameter_data(simulations: list) -> Optional[dict]:
     """Extract parameter values and returns from simulations."""
     if not simulations:
@@ -198,15 +210,8 @@ def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
     if len(param_names) == 0 or returns.empty:
         return
 
-    # Feature importance: absolute Spearman correlation
-    scores = []
-    for name in param_names:
-        vals = pd.Series(param_data[name])
-        mask = ~(vals.isna() | returns.isna())
-        if mask.sum() >= 3:
-            corr = float(returns[mask].corr(vals[mask], method='spearman'))
-            scores.append((name, abs(corr)))
-    
+    # Calculate parameter importance using Spearman correlation
+    scores = _calculate_parameter_importance(param_names, param_data, returns)
     if not scores:
         return
         
@@ -284,28 +289,26 @@ def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
             fig.update_xaxes(title_text=str(x_param), row=1, col=2)
             fig.update_yaxes(title_text=str(y_param), row=1, col=2)
 
-def _add_simulation_paths(fig: go.Figure, simulations: list, mc_results: Optional[Dict[str, Any]] = None):
+def _add_simulation_paths(fig: go.Figure, simulations: list, mc_results: Optional[Dict[str, Any]] = None) -> None:
     """Add simulation paths panel using path_matrix from Monte Carlo results."""
     if not mc_results or 'path_matrix' not in mc_results:
-        print("No path_matrix found in Monte Carlo results")
         return
     
     path_matrix = mc_results['path_matrix']
     if path_matrix is None or path_matrix.size == 0:
-        print("Empty path_matrix")
         return
     
     # path_matrix shape is (T, N) where T=time steps, N=simulations
     T, N = path_matrix.shape
-    print(f"Plotting Monte Carlo paths: {T} time steps, {N} simulations")
     
-    # Plot a sample of paths (max 20 for performance)
-    max_paths = min(20, N)
+    # Plot a sample of paths (max 50 for better visualization)
+    max_paths = min(50, N)
     step = max(1, N // max_paths)
     path_indices = range(0, N, step)[:max_paths]
     
     time_axis = list(range(T))
     
+    # Plot individual paths with low opacity
     for i, path_idx in enumerate(path_indices):
         path_values = path_matrix[:, path_idx]
         
@@ -313,48 +316,58 @@ def _add_simulation_paths(fig: go.Figure, simulations: list, mc_results: Optiona
         if not np.isfinite(path_values).any() or np.all(path_values == path_values[0]):
             continue
         
-        opacity = 0.3 if max_paths <= 10 else 0.2
         fig.add_trace(go.Scatter(
             x=time_axis,
             y=path_values,
             mode='lines',
             name='MC Paths' if i == 0 else None,
             showlegend=(i == 0),
-            line={'color': f'rgba(100,149,237,{opacity})', 'width': 1},
+            line={'color': 'rgba(100,149,237,0.15)', 'width': 1},
             hovertemplate="Time: %{x}<br>Return: %{y:.2f}%<extra></extra>"
         ), row=2, col=1)
     
+    # Calculate and plot median path (50th percentile)
+    median_path = np.nanmedian(path_matrix, axis=1)
+    fig.add_trace(go.Scatter(
+        x=time_axis,
+        y=median_path,
+        mode='lines',
+        name='Median Path',
+        line={'color': 'orange', 'width': 3},
+        showlegend=True,
+        hovertemplate="Time: %{x}<br>Median Return: %{y:.2f}%<extra></extra>"
+    ), row=2, col=1)
+    
+    # Add 5th and 95th percentile bands
+    percentile_5 = np.nanpercentile(path_matrix, 5, axis=1)
+    percentile_95 = np.nanpercentile(path_matrix, 95, axis=1)
+    
+    # Add shaded area for confidence interval
+    fig.add_trace(go.Scatter(
+        x=time_axis + time_axis[::-1],
+        y=list(percentile_95) + list(percentile_5[::-1]),
+        fill='toself',
+        fillcolor='rgba(100,149,237,0.1)',
+        line={'color': 'rgba(255,255,255,0)'},
+        name='90% Confidence',
+        showlegend=True,
+        hoverinfo='skip'
+    ), row=2, col=1)
+    
     # Add strategy performance line if available
     statistics = mc_results.get('statistics', {})
-    strategy_equity = statistics.get('strategy_equity_curve')
-    if strategy_equity and len(strategy_equity) > 1:
-        # Normalize strategy equity curve to match path_matrix format
-        strategy_array = np.array(strategy_equity)
-        if len(strategy_array) > 0 and strategy_array[0] != 0:
-            strategy_normalized = (strategy_array / strategy_array[0] - 1.0) * 100.0
-            
-            # Fit to same length as path_matrix
-            if len(strategy_normalized) != T:
-                if len(strategy_normalized) > T:
-                    strategy_normalized = strategy_normalized[:T]
-                else:
-                    # Pad with last value
-                    pad_length = T - len(strategy_normalized)
-                    last_val = strategy_normalized[-1] if len(strategy_normalized) > 0 else 0
-                    strategy_normalized = np.concatenate([
-                        strategy_normalized, 
-                        np.full(pad_length, last_val)
-                    ])
-            
-            fig.add_trace(go.Scatter(
-                x=time_axis,
-                y=strategy_normalized,
-                mode='lines',
-                name='Your Strategy',
-                line={'color': 'red', 'width': 3},
-                showlegend=True,
-                hovertemplate="Time: %{x}<br>Strategy Return: %{y:.2f}%<extra></extra>"
-            ), row=2, col=1)
+    actual_return = statistics.get('actual_return')
+    if actual_return is not None:
+        # Create a horizontal line at the actual return level
+        fig.add_trace(go.Scatter(
+            x=[0, T-1],
+            y=[actual_return, actual_return],
+            mode='lines',
+            name='Strategy Return',
+            line={'color': 'red', 'width': 3, 'dash': 'dash'},
+            showlegend=True,
+            hovertemplate=f"Strategy Return: {actual_return:.2f}%<extra></extra>"
+        ), row=2, col=1)
 
 
 def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:

@@ -1,21 +1,11 @@
-# ============================================================
-# Configuration for the Traders Dynamic Index (TDI) Strategy - Multi-TF, Pivots SL/TP, ATR sizing
-# ============================================================
-name: "tdi_strategy_mtft_pivatr"
+# Traders Dynamic Index (TDI) Strategy - Multi-Timeframe Configuration
 
-# ------------------------------------------------------------
-# Strategy Parameters
-# ------------------------------------------------------------
 parameters:
-  # Primary timeframe used to align signals / pivots application
   primary_timeframe: "1h"
-
-  # Pivot Point Parameters (weekly pivots, like PERIOD_W1 approximation)
-  pivot_timeframe: "1W"            # informational; pivots are computed via resample('W')
+  
+  # Pivot Point Parameters
   pivot_number: 2                   # 1..2 supported (S1/S2 and R1/R2)
-  target_probability: 50            # target for tp_size / (tp_size + sl_size) * 100
-  sl_distance_min: 0.001            # minimal distance in price units (~10 pips on EURUSD)
-  tp_distance_min: 0.001
+  target_probability: 50            # Target for tp_size / (tp_size + sl_size) * 100
 
   # TDI Core Parameters
   rsi_period: 21
@@ -25,9 +15,6 @@ parameters:
 
   # Multi-Timeframe Settings
   required_timeframes: ["15m", "30m", "1h", "4h", "1D"]
-
-  # Families activation per timeframe (strict all-or-nothing)
-  # Example: enable cross+trend on 1h only
   tdi_cross_enabled: [false, false, true, false, false]
   tdi_trend_enabled: [false, false, true, false, false]
   tdi_shift: 1
@@ -36,25 +23,18 @@ parameters:
   atr_length: 14
   k_atr: 2.0
   risk_pct: 1.0
-  use_equity_series: true
 
-# ------------------------------------------------------------
-# Optimization Parameter Ranges
-# ------------------------------------------------------------
 optimization_grid:
-  rsi_period: [21, 34]
-  tdi_fast_period: [2, 3]
-  tdi_slow_period: [7, 10]
-  pivot_number: [1, 2]
-  target_probability: [45, 55]
-  tdi_shift: [0, 1, 2]
-  atr_length: [14, 20]
-  k_atr: [1.5, 2.0, 3.0]
-  risk_pct: [0.5, 1.0, 2.0]
+  rsi_period: [21, 34, 13]
+  tdi_fast_period: [2, 3, 1]
+  tdi_slow_period: [7, 10, 3]
+  pivot_number: [1, 2, 1]
+  target_probability: [45, 55, 10]
+  tdi_shift: [0, 2, 1]
+  atr_length: [14, 20, 6]
+  k_atr: [1.5, 3.0, 0.5]
+  risk_pct: [0.5, 2.0, 0.5]
 
-# ------------------------------------------------------------
-# Data sources (examples)
-# ------------------------------------------------------------
 csv_path:
   - "data/EURUSD_15m_2021-2025.csv"
   - "data/EURUSD_30m_2017_2025.csv"

@@ -1,53 +1,35 @@
 #!/usr/bin/env python3
-"""
-Simple Parameter Optimizer
-"""
+"""Parameter optimization and Monte Carlo analysis."""
 
 from itertools import product
-from typing import Dict, Any, List, Optional, NamedTuple
+from typing import Dict, Any, List, NamedTuple, Optional
 import time
 import numpy as np
 import pandas as pd
 import vectorbt as vbt
 from scipy import stats
 
-# Simple config
-CONFIG = {
-    "init_cash": 10000,
-    "fees": 0.001,
-    "max_combinations": 50,
-    "monte_carlo_simulations": 500,
-}
+from constants import (
+    MAX_PARAM_COMBINATIONS,
+    MONTE_CARLO_SIMULATIONS,
+    MONTE_CARLO_BATCH_SIZE
+)
 
 # =============================================================================
-# CORE CLASSES
+# DOMAIN CONSTANTS - Optimizer Module
+# These constants are specific to optimization logic and not used elsewhere
 # =============================================================================
 
+# Composite scoring weights for parameter selection
+COMPOSITE_SCORE_SHARPE_WEIGHT = 0.7
+COMPOSITE_SCORE_RETURN_WEIGHT = 0.3
 
-def _extract_metrics(portfolio: "vbt.Portfolio") -> Dict[str, float]:
-    """Return consistent metrics from a vbt.Portfolio."""
-    try:
-        stats = portfolio.stats()
-        return {
-            "sharpe_ratio": float(stats.get("Sharpe Ratio", 0.0)),
-            "total_return": float(stats.get("Total Return [%]", 0.0)),
-            "max_drawdown": float(stats.get("Max Drawdown [%]", 0.0)),
-        }
-    except Exception:
-        raise Exception(
-            "Failed to extract metrics from portfolio. Ensure it is a valid vbt.Portfolio object."
-        )
-
-
-def _composite_score(metrics: Dict[str, float]) -> float:
-    """Weighted selection score."""
-    sr = metrics.get("sharpe_ratio", 0.0)
-    ret = metrics.get("total_return", 0.0)
-    dd = abs(metrics.get("max_drawdown", 0.0))
-    return 0.7 * sr + 0.3 * (ret / max(dd, 1.0))
-
+# Monte Carlo parameter sampling configuration
+MONTE_CARLO_THRESHOLD_SAMPLES = [0.0, 0.01, 0.02, 0.05, 0.1]
+MONTE_CARLO_FINE_GRID_POINTS = 10
 
 class OptimizationResult(NamedTuple):
+    """Results from parameter optimization."""
     best_portfolio: "vbt.Portfolio"
     best_params: Dict[str, Any]
     best_metrics: Dict[str, float]
@@ -55,517 +37,494 @@ class OptimizationResult(NamedTuple):
     execution_time: float
 
 
-class Optimizer:
-    def __init__(self, config: Optional[Dict] = None):
-        self.config = {**CONFIG, **(config or {})}
+def expand_parameter_grid(param_grid: Dict[str, Any]) -> Dict[str, List]:
+    """
+    Expand parameter grid from [start, end, step] format to list of values.
+    
+    Format: {"param": [start, end, step]}
+    Example: {"roc_period": [5, 20, 5]} -> [5, 10, 15, 20]
+    
+    Validates inputs to prevent invalid ranges.
+    """
+    expanded = {}
+    
+    for param_name, param_config in param_grid.items():
+        if not isinstance(param_config, list) or len(param_config) != 3:
+            raise ValueError(
+                f"Parameter '{param_name}' must be [start, end, step] format. "
+                f"Got: {param_config}"
+            )
+        
+        start, end, step = param_config
+        
+        if not all(isinstance(x, (int, float)) for x in [start, end, step]):
+            raise ValueError(
+                f"Parameter '{param_name}' values must be numeric. "
+                f"Got: {param_config}"
+            )
+        
+        # Validate range
+        if step == 0:
+            raise ValueError(f"Parameter '{param_name}' step cannot be zero")
+        
+        if step < 0:
+            raise ValueError(f"Parameter '{param_name}' step must be positive")
+            
+        if start > end:
+            raise ValueError(
+                f"Parameter '{param_name}' start ({start}) must be <= end ({end})"
+            )
+        
+        # Generate range
+        if isinstance(start, int) and isinstance(end, int) and isinstance(step, int):
+            expanded[param_name] = list(range(start, end + 1, step))
+        else:
+            values = []
+            current = start
+            while current <= end:
+                values.append(current)
+                current += step
+            expanded[param_name] = values
+    
+    return expanded
 
-    def optimize(
-        self, strategy_name: str, market_data: pd.DataFrame, param_grid: Dict[str, List]
-    ) -> OptimizationResult:
-        """Main optimization entry point."""
-        data = self._prepare_data(market_data)
-        split_idx = int(len(data) * self.config.get("split_ratio", 0.8))
-        train_data = data.iloc[:split_idx]
-        return self._run_grid(strategy_name, train_data, param_grid)
 
-    def _prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Prepare data for optimization."""
-        return data.asfreq("1H").ffill().dropna()
-
-    def _run_grid(
-        self, strategy_name: str, data: pd.DataFrame, param_grid: Dict[str, List]
-    ) -> OptimizationResult:
-        """Unified optimization engine using portfolio-direct approach."""
-        from strategy_registry import create_portfolio
-
-        start_time = time.time()
-        param_names = list(param_grid.keys())
-        combos = list(product(*param_grid.values()))
-        if not combos:
-            raise ValueError("Empty parameter grid")
-
-        # Sequential approach using create_portfolio directly
-        rows = []
-        best_params = None
-        best_score = -float("inf")
-        best_portfolio = None
-
-        for combo in combos:
-            params = dict(zip(param_names, combo))
+def extract_portfolio_metrics(portfolio: "vbt.Portfolio") -> Dict[str, float]:
+    """Extract key metrics from portfolio with safe null handling."""
+    try:
+        stats = portfolio.stats()
+        if stats is None:
+            return {"sharpe_ratio": 0.0, "total_return": 0.0, "max_drawdown": 0.0}
+        
+        # stats is a pandas Series - use safe indexing
+        def safe_get(key: str, default: float = 0.0) -> float:
             try:
-                pf = create_portfolio(strategy_name, data, params)
-                metrics = _extract_metrics(pf)
-                score = _composite_score(metrics)
-                rows.append({**params, **metrics, "composite_score": score})
-                if score > best_score:
-                    best_score = score
-                    best_params = params
-                    best_portfolio = pf
-            except Exception:
-                continue
-
-        if not rows:
-            raise ValueError("No successful parameter combinations")
-
-        results_df = pd.DataFrame(rows).sort_values(
-            "composite_score", ascending=False, ignore_index=True
-        )
-        return OptimizationResult(
-            best_portfolio=best_portfolio,
-            best_params=best_params,
-            best_metrics={
-                k: results_df.loc[0, k]
-                for k in [
-                    "sharpe_ratio",
-                    "total_return",
-                    "max_drawdown",
-                    "composite_score",
-                ]
-                if k in results_df.columns
-            },
-            all_results=results_df,
-            execution_time=time.time() - start_time,
-        )
+                if key not in stats.index:
+                    return default
+                value = stats[key]
+                # Handle scalar values
+                if isinstance(value, (int, float)):
+                    return float(value) if np.isfinite(value) else default
+                # Handle pandas scalar
+                if hasattr(value, 'item'):
+                    numeric_val = float(value.item())
+                    return numeric_val if np.isfinite(numeric_val) else default
+                return default
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return default
+        
+        return {
+            "sharpe_ratio": safe_get("Sharpe Ratio"),
+            "total_return": safe_get("Total Return [%]"),
+            "max_drawdown": safe_get("Max Drawdown [%]"),
+        }
+    except Exception:
+        return {"sharpe_ratio": 0.0, "total_return": 0.0, "max_drawdown": 0.0}
 
 
-# =============================================================================
-# MONTE CARLO ANALYSIS
-# =============================================================================
+def calculate_composite_score(metrics: Dict[str, float]) -> float:
+    """Calculate weighted composite score for parameter selection."""
+    sharpe = metrics.get("sharpe_ratio", 0.0)
+    returns = metrics.get("total_return", 0.0)
+    drawdown = abs(metrics.get("max_drawdown", 0.0))
+    return (COMPOSITE_SCORE_SHARPE_WEIGHT * sharpe + 
+            COMPOSITE_SCORE_RETURN_WEIGHT * (returns / max(drawdown, 1.0)))
+
+
+
 
 
 def run_optimization(
-    strategy_name: str, data: pd.DataFrame, param_grid: Dict = None
+    strategy_name: str, data, param_grid: Optional[Dict] = None
 ) -> Dict[str, Any]:
-    """Run parameter optimization with direct portfolio creation."""
+    """
+    Run parameter optimization using grid search.
+    
+    Args:
+        strategy_name: Name of the strategy
+        data: Either pd.DataFrame (single TF) or Dict[str, pd.DataFrame] (multi TF)
+        param_grid: Optional parameter grid override
+    """
     from strategy_registry import (
         create_portfolio,
         get_optimization_grid,
         get_default_parameters,
     )
 
-    try:
-        # Get optimization grid
-        if param_grid is None:
-            param_grid = get_optimization_grid(strategy_name)
-
-        if not param_grid:
-            print("⚠️ No optimization grid found, using default parameters")
-            return {"best_params": get_default_parameters(strategy_name)}
-
-        print(f"🎯 Optimizing {strategy_name} with {len(param_grid)} parameters")
-
-        # Use create_portfolio function directly
-
-        # Simple grid search implementation
-        default_params = get_default_parameters(strategy_name)
-        best_params = default_params.copy() if default_params else {}
-        best_score = -999999
-        best_portfolio = None
-
-        # Generate parameter combinations
-        param_names = list(param_grid.keys())
-        param_values = list(param_grid.values())
-        combinations = list(product(*param_values))
-
-        print(f"📊 Testing {len(combinations)} parameter combinations...")
-
-        max_combinations = 20
-        for combo in combinations[:max_combinations]:
-            test_params = best_params.copy()
-            for name, value in zip(param_names, combo):
-                test_params[name] = value
-
-            # Create portfolio directly with test parameters
-            try:
-                portfolio = create_portfolio(strategy_name, data, test_params)
-                stats = portfolio.stats()
-                score = float(stats.get("Sharpe Ratio", -999))
-
-                if score > best_score:
-                    best_score = score
-                    best_params = test_params.copy()
-                    best_portfolio = portfolio
-
-            except Exception as e:
-                print(f"Failed combo {test_params}: {e}")
-                continue
-
-        if best_portfolio is not None:
-            print(f"✅ Best parameters found: {best_params} (Sharpe: {best_score:.3f})")
-        else:
-            print("⚠️ No successful parameter combinations found")
-
-        return {
-            "best_params": best_params,
-            "best_score": best_score,
-            "best_portfolio": best_portfolio,
-            "tested_combinations": min(len(combinations), max_combinations),
-        }
-
-    except Exception as e:
-        print(f"⚠️ Optimization failed: {e}")
-        return {"error": str(e), "best_params": get_default_parameters(strategy_name)}
-
-
-def _get_strategy_equity_curve(strategy_name: str, data: pd.DataFrame, params: Dict):
-    """Helper function to get strategy equity curve."""
-    from strategy_registry import create_portfolio
-
-    try:
-        portfolio = create_portfolio(strategy_name, data, params)
-        return portfolio.value().tolist()
-    except Exception:
-        return None
-
-
-def _get_actual_strategy_return(
-    strategy_name: str,
-    data: pd.DataFrame,
-    params: Dict,
-    actual_return: Optional[float] = None,
-):
-    """Helper function to get actual strategy return."""
-    if strategy_name is not None:
-        try:
-            from strategy_registry import create_portfolio
-
-            portfolio = create_portfolio(strategy_name, data, params)
-            actual_stats = portfolio.stats()
-            return float(actual_stats.get("Total Return [%]", 0))
-        except Exception:
-            return 0.0
-    return actual_return
-
-
-def _load_and_expand_param_grid(strategy_name: str):
-    """Helper function to load and expand parameter grid."""
-    from strategy_registry import get_optimization_grid
-
-    try:
+    if param_grid is None:
         param_grid = get_optimization_grid(strategy_name)
 
-        # Expand parameter ranges for better Monte Carlo sampling
-        expanded_grid = {}
-        for param_name, param_values in param_grid.items():
-            if len(param_values) >= 2:
-                min_val, max_val = min(param_values), max(param_values)
-                if isinstance(min_val, (int, float)) and isinstance(
-                    max_val, (int, float)
-                ):
-                    if isinstance(min_val, int) and isinstance(max_val, int):
-                        expanded_grid[param_name] = list(range(min_val, max_val + 1))
-                    else:
-                        # Special handling for threshold parameters - keep them small
-                        if "threshold" in param_name.lower() and min_val == 0.0:
-                            expanded_grid[param_name] = [
-                                0.0,
-                                0.01,
-                                0.02,
-                                0.05,
-                                0.1,
-                                max_val,
-                            ]
-                        else:
-                            expanded_grid[param_name] = [
-                                min_val + (max_val - min_val) * i / 9 for i in range(10)
-                            ]
-                else:
-                    expanded_grid[param_name] = param_values
-            else:
-                expanded_grid[param_name] = param_values
-        return expanded_grid
+    if not param_grid:
+        print("⚠️ No optimization grid found, using default parameters")
+        return {"best_params": get_default_parameters(strategy_name)}
 
-    except:
-        # Fallback parameter ranges
-        return {
-            "vol_momentum_window": list(range(15, 26)),
-            "vol_momentum_threshold": [0.0, 0.01, 0.02, 0.05],
-            "wma_length": list(range(30, 71, 10)),
-        }
+    print(f"🎯 Optimizing {strategy_name} with {len(param_grid)} parameters")
+
+    # Expand parameter grid (supports start/end/step format)
+    expanded_grid = expand_parameter_grid(param_grid)
+    
+    # Get default parameters as base
+    default_params = get_default_parameters(strategy_name)
+    best_params = default_params.copy() if default_params else {}
+    best_score = -float("inf")
+    best_portfolio = None
+
+    # Generate parameter combinations
+    param_names = list(expanded_grid.keys())
+    param_values = list(expanded_grid.values())
+    combinations = list(product(*param_values))
+
+    total_combinations = len(combinations)
+    test_limit = min(total_combinations, MAX_PARAM_COMBINATIONS)
+    
+    print(f"📊 Testing {test_limit} of {total_combinations} parameter combinations...")
+    print(f"   First combo to test: {dict(zip(param_names, combinations[0]))}")
+    
+    success_count = 0
+    failure_count = 0
+
+    for idx, combo in enumerate(combinations[:test_limit]):
+        test_params = best_params.copy()
+        for name, value in zip(param_names, combo):
+            test_params[name] = value
+
+        try:
+            portfolio = create_portfolio(strategy_name, data, test_params)
+            
+            if portfolio is None:
+                failure_count += 1
+                if failure_count <= 3:
+                    print(f"   ⚠️ Combo {idx+1}: create_portfolio returned None")
+                    print(f"      Params: {test_params}")
+                continue
+                
+            stats = portfolio.stats()
+            if stats is None:
+                failure_count += 1
+                continue
+            
+            # stats is a pandas Series, use safe indexing
+            try:
+                sharpe = stats["Sharpe Ratio"] if "Sharpe Ratio" in stats.index else None
+                if sharpe is None or pd.isna(sharpe) or not np.isfinite(float(sharpe)):
+                    failure_count += 1
+                    if failure_count <= 3:
+                        print(f"   ⚠️ Combo {idx+1}: Invalid Sharpe Ratio")
+                        print(f"      Params: {test_params}")
+                    continue
+                score = float(sharpe)
+            except (KeyError, TypeError, ValueError):
+                failure_count += 1
+                continue
+
+            if score > best_score:
+                best_score = score
+                best_params = test_params.copy()
+                best_portfolio = portfolio
+            
+            success_count += 1
+
+        except Exception as e:
+            failure_count += 1
+            if failure_count <= 3:
+                print(f"   ❌ Combo {idx+1} CRASHED: {test_params}")
+                print(f"      Error: {type(e).__name__}: {str(e)[:200]}")
+                import traceback
+                print(f"      Traceback: {traceback.format_exc()[:500]}")
+            continue
+
+    if best_portfolio is not None:
+        print(f"✅ Best parameters found (Sharpe: {best_score:.3f}) - {success_count}/{test_limit} succeeded")
+    else:
+        print(f"⚠️ No successful parameter combinations found ({failure_count}/{test_limit} failed)")
+
+    return {
+        "best_params": best_params,
+        "best_score": best_score,
+        "best_portfolio": best_portfolio,
+        "tested_combinations": test_limit,
+    }
+
+
+def get_strategy_return(strategy_name: str, data, params: Dict) -> float:
+    """Get actual strategy return with safe null handling. Accepts DataFrame or Dict."""
+    from strategy_registry import create_portfolio
+    
+    portfolio = create_portfolio(strategy_name, data, params)
+    if portfolio is None:
+        return 0.0
+        
+    stats = portfolio.stats()
+    if stats is None:
+        return 0.0
+    
+    try:
+        value = stats["Total Return [%]"] if "Total Return [%]" in stats.index else 0.0
+        return float(value) if pd.notna(value) and np.isfinite(float(value)) else 0.0
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
+def expand_grid_for_monte_carlo(param_grid: Dict) -> Dict[str, List]:
+    """Expand parameter grid for Monte Carlo sampling with finer granularity."""
+    expanded = expand_parameter_grid(param_grid)
+    
+    # Further expand numeric ranges for better sampling
+    monte_carlo_grid = {}
+    for param_name, param_values in expanded.items():
+        if len(param_values) >= 2:
+            min_val, max_val = min(param_values), max(param_values)
+            if isinstance(min_val, (int, float)) and isinstance(max_val, (int, float)):
+                if isinstance(min_val, int) and isinstance(max_val, int):
+                    monte_carlo_grid[param_name] = list(range(min_val, max_val + 1))
+                else:
+                    if "threshold" in param_name.lower() and min_val == 0.0:
+                        monte_carlo_grid[param_name] = MONTE_CARLO_THRESHOLD_SAMPLES + [max_val]
+                    else:
+                        monte_carlo_grid[param_name] = [
+                            min_val + (max_val - min_val) * i / (MONTE_CARLO_FINE_GRID_POINTS - 1) 
+                            for i in range(MONTE_CARLO_FINE_GRID_POINTS)
+                        ]
+            else:
+                monte_carlo_grid[param_name] = param_values
+        else:
+            monte_carlo_grid[param_name] = param_values
+    
+    return monte_carlo_grid
 
 
 def run_monte_carlo_analysis(
-    data: pd.DataFrame,
-    strategy_name: str = None,
-    params: Dict = None,
-    actual_return: float = None,
+    data,
+    strategy_name: Optional[str] = None,
+    params: Optional[Dict] = None,
+    actual_return: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Run Monte Carlo parameter sensitivity analysis with path matrix, batching, and robust stats."""
-    try:
-        t0 = time.time()
-        n_bars = len(data)
-        print(f"🎲 Monte Carlo parameter analysis on {n_bars} bars")
-        # Guard: empty or too small data
-        if n_bars < 10:
-            return {
-                "error": "insufficient_data",
-                "summary": f"Not enough bars for MC: {n_bars}",
-            }
+    """
+    Run Monte Carlo parameter sensitivity analysis.
+    
+    Args:
+        data: Either pd.DataFrame (single TF) or Dict[str, pd.DataFrame] (multi TF)
+        strategy_name: Name of the strategy
+        params: Optional parameters
+        actual_return: Optional actual return for comparison
+    
+    This is a standard Monte Carlo simulation that:
+    1. Randomly samples parameters from the optimization grid
+    2. Runs the strategy with each parameter set
+    3. Collects equity curves and final returns
+    4. Analyzes the distribution of outcomes
+    
+    The goal is to understand parameter sensitivity and robustness:
+    - If the strategy performs well across many random parameters, it's robust
+    - If it only works with specific parameters, it's overfit
+    """
+    start_time = time.time()
+    
+    # Handle both single and multi-timeframe data
+    if isinstance(data, dict):
+        # Multi-timeframe: get primary timeframe length
+        primary_tf = list(data.keys())[0]
+        num_bars = len(data[primary_tf])
+    else:
+        num_bars = len(data)
+    
+    print(f"🎲 Monte Carlo parameter sensitivity analysis ({MONTE_CARLO_SIMULATIONS} simulations)")
+    
+    if num_bars < 10:
+        raise ValueError(f"Insufficient data for Monte Carlo: {num_bars} bars")
 
-        from strategy_registry import get_default_parameters
+    from strategy_registry import get_default_parameters, get_optimization_grid, create_portfolio
 
-        if params is None:
-            params = get_default_parameters(strategy_name or "momentum")
+    if not strategy_name:
+        raise ValueError("strategy_name is required for Monte Carlo analysis")
 
-        actual_return = _get_actual_strategy_return(
-            strategy_name, data, params, actual_return
-        )
-        param_grid = _load_and_expand_param_grid(strategy_name or "momentum")
-        if not isinstance(param_grid, dict) or len(param_grid) == 0:
-            return {
-                "error": "empty_param_grid",
-                "summary": "No parameters to sample for MC",
-            }
+    if params is None:
+        default_params = get_default_parameters(strategy_name)
+        params = default_params if default_params else {}
 
-        # Configurable knobs
-        num_simulations = int(CONFIG.get("monte_carlo_simulations", 500))
-        if num_simulations <= 0:
-            return {
-                "error": "zero_simulations",
-                "summary": "monte_carlo_simulations must be > 0",
-            }
-
-        batch_size = int(CONFIG.get("monte_carlo_batch_size", 128))
-        batch_size = max(1, batch_size)
-        seed = CONFIG.get("random_seed", None)
-        if seed is not None and np.isfinite(seed):
-            np.random.seed(int(seed))
-
-        # Prepare collectors
-        simulations: List[Dict[str, Any]] = []
-        final_returns: List[float] = []
-        path_matrix_list: List[np.ndarray] = []
-        success = 0
-        failures = 0
-
-        # Strategy hooks
-        from strategy_registry import create_portfolio
-
-        param_names = list(param_grid.keys())
-
-        print(
-            f"   Running {num_simulations} Monte Carlo simulations in batches of {batch_size}..."
-        )
-
-        def sample_params() -> Dict[str, Any]:
-            rnd: Dict[str, Any] = {}
-            for pname, pvalues in param_grid.items():
-                try:
-                    if len(pvalues) >= 2 and all(
-                        isinstance(v, (int, float)) for v in pvalues
-                    ):
-                        lo, hi = min(pvalues), max(pvalues)
-                        if isinstance(lo, int) and isinstance(hi, int):
-                            rnd[pname] = int(np.random.randint(lo, hi + 1))
-                        else:
-                            rnd[pname] = float(np.random.uniform(lo, hi))
-                    else:
-                        rnd[pname] = np.random.choice(pvalues)
-                except Exception:
-                    rnd[pname] = (
-                        pvalues[0] if isinstance(pvalues, list) and pvalues else None
-                    )
-            return rnd
-
-        # Iterate batches
-        for start in range(0, num_simulations, batch_size):
-            end = min(start + batch_size, num_simulations)
-            batch_params = [sample_params() for _ in range(start, end)]
-
-            for sim_idx, rnd_params in enumerate(batch_params, start=start):
-                try:
-                    portfolio = create_portfolio(
-                        strategy_name or "momentum", data, rnd_params
-                    )
-                    metrics = _extract_metrics(portfolio)
-                    total_return_pct = float(metrics.get("total_return", np.nan))
-
-                    # Skip invalid returns
-                    if not np.isfinite(total_return_pct):
-                        failures += 1
-                        continue
-
-                    eq_series = portfolio.value()
-                    if (
-                        eq_series is None
-                        or len(eq_series) == 0
-                        or eq_series.isna().all()
-                    ):
-                        failures += 1
-                        continue
-
-                    # Normalize to % change from start (vectorized)
-                    s0 = float(eq_series.iloc[0])
-                    if not np.isfinite(s0) or s0 == 0:
-                        failures += 1
-                        continue
-
-                    norm = (eq_series.values / s0 - 1.0) * 100.0
-
-                    # Handle NaN/Inf values by forward filling instead of removing them
-                    # This preserves the time series length
-                    if not np.isfinite(norm).any():
-                        failures += 1
-                        continue
-
-                    # Forward fill NaN/Inf values to maintain time series integrity
-                    norm_clean = np.copy(norm)
-                    finite_mask = np.isfinite(norm_clean)
-
-                    # If first value is not finite, find first finite value
-                    if not finite_mask[0]:
-                        first_finite_idx = np.where(finite_mask)[0]
-                        if len(first_finite_idx) == 0:
-                            failures += 1
-                            continue
-                        norm_clean[: first_finite_idx[0]] = 0.0  # Start at 0% return
-
-                    # Forward fill any remaining NaN/Inf values
-                    for j in range(1, len(norm_clean)):
-                        if not np.isfinite(norm_clean[j]):
-                            norm_clean[j] = norm_clean[j - 1]
-
-                    path_matrix_list.append(
-                        norm_clean.astype(np.float32)
-                    )  # store as float32 to save memory
-
-                    # Collect sim record
-                    sim_record = {
-                        "simulation": sim_idx + 1,
-                        "total_return": total_return_pct,
-                        "parameters": rnd_params.copy(),
-                        "param1": rnd_params.get(param_names[0], 0)
-                        if param_names
-                        else 0,
-                        "param2": rnd_params.get(param_names[1], 0)
-                        if len(param_names) > 1
-                        else 0,
-                        "equity_curve": None,  # do not store full curve here to avoid duplication; paths in path_matrix
-                    }
-                    simulations.append(sim_record)
-                    final_returns.append(total_return_pct)
-                    success += 1
-                except Exception:
-                    failures += 1
-                    # do not synthesize fake returns; just count failure
-
-            if (start // max(batch_size, 1)) % 5 == 0:
-                print(
-                    f"   ... progress: {min(end, num_simulations)}/{num_simulations} sims, success={success}, failures={failures}"
-                )
-
-        # Harmonize path lengths by padding or truncating to min/max length
-        lengths = [len(p) for p in path_matrix_list]
-        if len(lengths) == 0:
-            print("⚠️ No successful simulations; returning empty Monte Carlo result")
-            return {
-                "error": "no_successful_simulations",
-                "simulations": [],
-                "statistics": {},
-                "summary": "No MC sims succeeded",
-            }
-
-        # Use a more robust target length - use the most common length or median
-        target_len = int(np.median(lengths))
-        target_len = max(10, min(target_len, n_bars))
-
-        print(
-            f"   Debug: Path lengths - min: {min(lengths)}, max: {max(lengths)}, median: {np.median(lengths)}, target: {target_len}"
-        )
-
-        def fit_length(arr: np.ndarray) -> np.ndarray:
-            if len(arr) == 0:
-                print(
-                    "   Warning: Empty array in path_matrix_list, this should not happen"
-                )
-                return np.zeros((target_len,), dtype=np.float32)
-
-            if len(arr) >= target_len:
-                return arr[:target_len]
-
-            # Pad with last value to maintain shape
-            pad_val = arr[-1] if len(arr) > 0 else 0.0
-            pad = np.full((target_len - len(arr),), pad_val, dtype=np.float32)
-            return np.concatenate([arr, pad], axis=0)
-
-        fitted = [fit_length(p) for p in path_matrix_list]
-        path_matrix = np.stack(fitted, axis=1)  # shape (T, N)
-
-        # Robust distribution stats from final_returns
-        returns_arr = np.asarray(final_returns, dtype=np.float64)
-        finite_mask = np.isfinite(returns_arr)
-        returns_arr = returns_arr[finite_mask]
-        valid_count = int(returns_arr.size)
-
-        if valid_count == 0:
-            stats_out = {
-                "mean_return": np.nan,
-                "std_return": np.nan,
-                "min_return": np.nan,
-                "max_return": np.nan,
-                "percentile_5": np.nan,
-                "percentile_95": np.nan,
-                "count": 0,
-            }
-            percentile = p_value = is_significant = None
+    if actual_return is None and params:
+        actual_return = get_strategy_return(strategy_name, data, params)
+    
+    param_grid = get_optimization_grid(strategy_name)
+    if not param_grid or not isinstance(param_grid, dict):
+        raise ValueError("No parameter grid found for Monte Carlo analysis")
+    
+    expanded_grid = expand_grid_for_monte_carlo(param_grid)
+    
+    # Debug: Print parameter ranges
+    print("   Parameter ranges for Monte Carlo:")
+    for param_name, param_values in expanded_grid.items():
+        if len(param_values) >= 2:
+            print(f"      {param_name}: [{min(param_values)}, {max(param_values)}] ({len(param_values)} values)")
         else:
-            stats_out = {
-                "mean_return": float(np.mean(returns_arr)),
-                "std_return": float(np.std(returns_arr, ddof=0)),
-                "min_return": float(np.min(returns_arr)),
-                "max_return": float(np.max(returns_arr)),
-                "percentile_5": float(np.percentile(returns_arr, 5)),
-                "percentile_95": float(np.percentile(returns_arr, 95)),
-                "count": valid_count,
-            }
-            if actual_return is not None and np.isfinite(actual_return):
-                percentile = float(stats.percentileofscore(returns_arr, actual_return))
-                p_value = float(min(percentile, 100.0 - percentile) / 100.0)
-                is_significant = bool(p_value < 0.05)
+            print(f"      {param_name}: {param_values}")
+
+    simulations = []
+    final_returns = []
+    path_matrix_list = []
+    success_count = 0
+    failure_count = 0
+
+    def sample_random_params() -> Dict[str, Any]:
+        """Sample random parameters uniformly from the expanded grid."""
+        sampled = {}
+        for param_name, param_values in expanded_grid.items():
+            if len(param_values) >= 2 and all(isinstance(v, (int, float)) for v in param_values):
+                min_val, max_val = min(param_values), max(param_values)
+                if isinstance(min_val, int) and isinstance(max_val, int):
+                    sampled[param_name] = int(np.random.randint(min_val, max_val + 1))
+                else:
+                    sampled[param_name] = float(np.random.uniform(min_val, max_val))
             else:
-                percentile = p_value = is_significant = None
+                sampled[param_name] = np.random.choice(param_values)
+        return sampled
 
-        # Logging summary
-        dt = time.time() - t0
-        print(
-            f"   MC done in {dt:.2f}s: success={success}, failures={failures}, valid_returns={valid_count}, path_matrix={path_matrix.shape}"
-        )
+    # Run simulations in batches for progress reporting
+    # At this point strategy_name is guaranteed to be a string (checked above)
+    
+    # Debug: Sample a few params to verify variation
+    if MONTE_CARLO_SIMULATIONS >= 5:
+        print("   Sample parameter sets:")
+        for i in range(min(5, MONTE_CARLO_SIMULATIONS)):
+            sample = sample_random_params()
+            print(f"      Sample {i+1}: {sample}")
+    
+    for batch_start in range(0, MONTE_CARLO_SIMULATIONS, MONTE_CARLO_BATCH_SIZE):
+        batch_end = min(batch_start + MONTE_CARLO_BATCH_SIZE, MONTE_CARLO_SIMULATIONS)
 
-        strategy_equity_curve = (
-            _get_strategy_equity_curve(strategy_name, data, params)
-            if strategy_name
-            else None
-        )
+        for sim_index in range(batch_start, batch_end):
+            random_params = sample_random_params()
+            
+            try:
+                # strategy_name is guaranteed non-None by validation above
+                portfolio = create_portfolio(strategy_name, data, random_params)  # type: ignore[arg-type]
+                
+                if portfolio is None:
+                    failure_count += 1
+                    if failure_count <= 3:
+                        print(f"   ❌ Sim {sim_index+1}: create_portfolio returned None")
+                        print(f"      Params: {random_params}")
+                    continue
+                
+                metrics = extract_portfolio_metrics(portfolio)
+                total_return = float(metrics.get("total_return", np.nan))
 
-        statistics = {
-            **stats_out,
-            "actual_return": actual_return,
-            "percentile_rank": percentile,
+                if not np.isfinite(total_return):
+                    failure_count += 1
+                    if failure_count <= 3:
+                        print(f"   ❌ Sim {sim_index+1}: total_return is {total_return}")
+                        print(f"      Params: {random_params}")
+                    continue
+
+                equity_series = portfolio.value()
+                if equity_series is None or len(equity_series) == 0 or equity_series.isna().all():
+                    failure_count += 1
+                    continue
+
+                initial_value = float(equity_series.iloc[0])
+                if not np.isfinite(initial_value) or initial_value == 0:
+                    failure_count += 1
+                    continue
+
+                # Normalize equity curve to percentage returns
+                normalized_returns = (equity_series.values / initial_value - 1.0) * 100.0
+
+                if not np.isfinite(normalized_returns).any():
+                    failure_count += 1
+                    continue
+
+                # Clean up NaN/Inf values
+                clean_returns = np.copy(normalized_returns)
+                finite_mask = np.isfinite(clean_returns)
+
+                if not finite_mask[0]:
+                    first_finite = np.where(finite_mask)[0]
+                    if len(first_finite) == 0:
+                        failure_count += 1
+                        continue
+                    clean_returns[:first_finite[0]] = 0.0
+
+                # Forward fill any remaining NaN values
+                for i in range(1, len(clean_returns)):
+                    if not np.isfinite(clean_returns[i]):
+                        clean_returns[i] = clean_returns[i - 1]
+
+                path_matrix_list.append(clean_returns.astype(np.float32))
+
+                sim_record = {
+                    "simulation": sim_index + 1,
+                    "total_return": total_return,
+                    "parameters": random_params.copy(),
+                }
+                simulations.append(sim_record)
+                final_returns.append(total_return)
+                success_count += 1
+                
+            except Exception:
+                failure_count += 1
+
+        # Progress reporting every 5 batches
+        if (batch_start // MONTE_CARLO_BATCH_SIZE) % 5 == 0 and batch_start > 0:
+            print(f"   Progress: {batch_end}/{MONTE_CARLO_SIMULATIONS} ({success_count} successful)")
+
+    if not path_matrix_list:
+        raise ValueError("No successful Monte Carlo simulations")
+
+    # Harmonize path lengths
+    lengths = [len(p) for p in path_matrix_list]
+    target_length = int(np.median(lengths))
+    target_length = max(10, min(target_length, num_bars))
+
+    def normalize_path_length(path: np.ndarray) -> np.ndarray:
+        """Normalize path to target length by truncating or padding."""
+        if len(path) >= target_length:
+            return path[:target_length]
+        
+        pad_value = path[-1] if len(path) > 0 else 0.0
+        padding = np.full((target_length - len(path),), pad_value, dtype=np.float32)
+        return np.concatenate([path, padding])
+
+    normalized_paths = [normalize_path_length(p) for p in path_matrix_list]
+    path_matrix = np.stack(normalized_paths, axis=1)
+
+    # Calculate statistics
+    returns_array = np.array(final_returns, dtype=np.float64)
+    finite_returns = returns_array[np.isfinite(returns_array)]
+    
+    if len(finite_returns) == 0:
+        raise ValueError("No valid returns in Monte Carlo simulations")
+
+    statistics = {
+        "mean_return": float(np.mean(finite_returns)),
+        "std_return": float(np.std(finite_returns, ddof=0)),
+        "min_return": float(np.min(finite_returns)),
+        "max_return": float(np.max(finite_returns)),
+        "percentile_5": float(np.percentile(finite_returns, 5)),
+        "percentile_95": float(np.percentile(finite_returns, 95)),
+        "count": len(finite_returns),
+        "actual_return": actual_return,
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "duration_sec": time.time() - start_time,
+    }
+
+    # Significance test
+    if actual_return is not None and np.isfinite(actual_return):
+        percentile_rank = float(stats.percentileofscore(finite_returns, actual_return))
+        p_value = float(min(percentile_rank, 100.0 - percentile_rank) / 100.0)
+        is_significant = p_value < 0.05
+        
+        statistics.update({
+            "percentile_rank": percentile_rank,
             "p_value": p_value,
             "is_significant": is_significant,
-            "path_matrix_shape": tuple(path_matrix.shape),
-            "success_count": success,
-            "failure_count": failures,
-            "duration_sec": dt,
-        }
+        })
 
-        return {
-            "simulations": simulations,  # lightweight per-sim metadata
-            "statistics": statistics,
-            "path_matrix": path_matrix,  # numpy array (T, N), normalized %
-            "summary": f"Completed {success} / {num_simulations} Monte Carlo simulations",
-            "significance_test": {
-                "actual_return": actual_return,
-                "percentile_rank": percentile,
-                "p_value": p_value,
-                "is_significant": is_significant,
-                "interpretation": (
-                    f"Strategy performance is {'significant' if is_significant else 'not significant'} vs random"
-                    if is_significant is not None
-                    else "No actual return provided"
-                ),
-            },
-        }
-    except Exception as e:
-        print(f"⚠️ Monte Carlo analysis failed: {e}")
-        return {"error": str(e)}
+    print(f"   Completed in {statistics['duration_sec']:.2f}s: {success_count} successful, {failure_count} failed")
+
+    return {
+        "simulations": simulations,
+        "statistics": statistics,
+        "path_matrix": path_matrix,
+        "summary": f"Completed {success_count} of {MONTE_CARLO_SIMULATIONS} Monte Carlo simulations",
+    }

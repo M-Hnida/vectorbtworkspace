@@ -5,9 +5,9 @@ parameters:
   primary_timeframe: "1H"
 
 optimization_grid:
-  rsi_period: [10, 14, 21]
-  oversold_level: [20, 25, 30]
-  overbought_level: [70, 75, 80]
+  rsi_period: [10, 21, 7]
+  oversold_level: [20, 30, 5]
+  overbought_level: [70, 80, 5]
 
 data_requirements:
   required_timeframes: ["1H"]

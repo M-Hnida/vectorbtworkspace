@@ -236,23 +236,18 @@ def create_portfolio_vectorized(data: pd.DataFrame, params: Dict = None) -> "vbt
     max_position_size = params.get("max_position_size", 0.2)
     
     # Calculate indicators
-    print("Calculating indicators...")
     data = calculate_indicators(data, params)
     
     # Apply position sizing
-    print("Applying position sizing...")
     position_sizes = apply_position_sizing(data, params)
     
     # Apply leverage management
-    print("Applying leverage management...")
     leverage = apply_leverage_management(data, params)
     
     # Calculate dynamic stop-loss series
-    print("Calculating dynamic stop-loss...")
     stop_long, stop_short = calculate_dynamic_stop_loss_series(data, params)
     
     # Entry conditions
-    print("Calculating entry conditions...")
     
     # Common filters
     has_minimum_volatility = data['atr_normalized'] > data['atr_normalized_threshold']
@@ -326,9 +321,6 @@ def create_portfolio_vectorized(data: pd.DataFrame, params: Dict = None) -> "vbt
     total_trades = total_long + total_short
     years = len(data) / (365 * 24)
     trades_per_year = total_trades / years if years > 0 else 0
-    
-    print(f"Donchian ATR Trend Strategy - Long: {total_long}, Short: {total_short}")
-    print(f"Total trades: {total_trades}, Trades/year: {trades_per_year:.1f}")
     
     # Calculate order sizes based on position sizing and leverage
     order_sizes_long = position_sizes * leverage * init_cash / data['close']
@@ -405,7 +397,6 @@ def create_portfolio_vectorized(data: pd.DataFrame, params: Dict = None) -> "vbt
         prices_series = pd.Series([], dtype='float64')
     
     # Create portfolio with custom stops using from_signals
-    print("Creating portfolio with custom stops...")
     primary_timeframe = params.get("primary_timeframe", "1H")
     
     # Create portfolio using from_signals with SL and TP as percentages
@@ -535,8 +526,6 @@ def run_backtest(data: pd.DataFrame, params: Dict = None) -> "vbt.Portfolio":
     
     # Merge with user provided params
     default_params.update(params)
-    
-    print("Running Donchian ATR Trend Strategy backtest...")
     
     # Run strategy
     portfolio = create_portfolio(data, default_params)

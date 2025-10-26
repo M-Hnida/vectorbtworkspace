@@ -10,8 +10,8 @@ parameters:
 
 # Optimization grid for parameter tuning
 optimization_grid:
-  grid_k: [1.01, 1.02, 1.03, 1.05]
-  grid_n: [10, 15, 20, 25]
+  grid_k: [1.01, 1.05, 0.01]
+  grid_n: [10, 25, 5]
 
 # Data requirements
 data_requirements:
