@@ -1,0 +1,74 @@
+strategy:
+  name: "risk_premia"
+  description: "Multi-factor risk premia strategy combining momentum, carry, value signals"
+  
+parameters:
+  # Data parameters
+  symbols: ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'GC=F']
+  start_date: '2020-01-01'
+  end_date: '2024-01-01'
+  
+  # Risk parameters
+  target_vol: 0.15
+  max_leverage: 2.0
+  max_daily_loss: 0.05  # 5%
+  max_total_dd: 0.10    # 10%
+  
+  # Signal weights
+  momentum_weight: 0.4
+  carry_weight: 0.3
+  value_weight: 0.3
+  
+  # Technical parameters
+  fast_ma_window: 10
+  slow_ma_window: 30
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  carry_lookback: 5
+  value_ma_window: 20
+  vol_window: 20
+  
+  # Portfolio parameters
+  rebalance_freq: 'W'  # Weekly rebalancing
+  position_threshold: 0.1
+  fees: 0.0002  # 2 bps
+  slippage: 0.0001
+  init_cash: 10000
+
+optimization:
+  enabled: true
+  parameters:
+    fast_ma_window:
+      min: 5
+      max: 20
+      step: 5
+    slow_ma_window:
+      min: 20
+      max: 50
+      step: 10
+    momentum_weight:
+      min: 0.2
+      max: 0.6
+      step: 0.1
+    target_vol:
+      min: 0.10
+      max: 0.20
+      step: 0.02
+
+backtest:
+  walk_forward: true
+  train_ratio: 0.7
+  min_periods: 252  # 1 year minimum
+  
+risk_management:
+  ftmo_rules: true
+  daily_loss_limit: 0.05
+  total_dd_limit: 0.10
+  position_sizing: "risk_parity"
+  
+plotting:
+  show_portfolio: true
+  show_drawdowns: true
+  show_per_asset: true
+  save_plots: false

@@ -20,7 +20,9 @@ from config_validator import quick_validate
 warnings.filterwarnings("ignore")
 
 
-def get_primary_data(data: Dict, strategy_config: Dict) -> Tuple[str, str, pd.DataFrame]:
+def get_primary_data(
+    data: Dict, strategy_config: Dict
+) -> Tuple[str, str, pd.DataFrame]:
     """Get primary symbol/timeframe data with fallbacks."""
     if not data:
         raise ValueError("No data provided")
@@ -78,6 +80,7 @@ def run_backtest_for_strategy(
         # Get portfolio statistics
         try:
             from constants import STAT_TOTAL_RETURN
+
             stats = portfolio.stats()
             if stats is not None and STAT_TOTAL_RETURN in stats.index:
                 total_return = stats[STAT_TOTAL_RETURN]
@@ -85,13 +88,16 @@ def run_backtest_for_strategy(
             else:
                 print(f"✅ {symbol} {timeframe}: Portfolio created")
         except Exception as stats_error:
-            print(f"✅ {symbol} {timeframe}: Portfolio created but stats failed: {stats_error}")
+            print(
+                f"✅ {symbol} {timeframe}: Portfolio created but stats failed: {stats_error}"
+            )
 
         return portfolio
 
     except Exception as e:
         print(f"❌ {symbol} {timeframe} failed: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -135,10 +141,13 @@ def run_full_backtest(data: Dict, strategy_name: str, parameters: dict) -> Dict:
 def print_aggregated_portfolio_stats(results: Dict):
     """Print full pf.stats() for each portfolio and aggregated statistics."""
     from constants import (
-        STAT_TOTAL_RETURN, STAT_SHARPE_RATIO, STAT_MAX_DRAWDOWN,
-        STAT_WIN_RATE, STAT_TOTAL_TRADES
+        STAT_TOTAL_RETURN,
+        STAT_SHARPE_RATIO,
+        STAT_MAX_DRAWDOWN,
+        STAT_WIN_RATE,
+        STAT_TOTAL_TRADES,
     )
-    
+
     print("\n" + "=" * 80)
     print("📊 INDIVIDUAL PORTFOLIO STATISTICS (Full pf.stats())")
     print("=" * 80)
@@ -231,7 +240,7 @@ def run_strategy_analysis(
         raw_config = load_strategy_config(strategy_name) or {}
         strategy_config = raw_config.copy()  # Use the full config
         strategy_config["name"] = strategy_name  # Ensure name is set
-        
+
         # Validate configuration
         print(f"\n🔍 Validating configuration for '{strategy_name}'...")
         config_valid = quick_validate(strategy_name, strategy_config, auto_fix=False)
@@ -241,18 +250,18 @@ def run_strategy_analysis(
 
         # Create simple strategy context using dict-like object
         from types import SimpleNamespace
-        
+
         def get_parameter(key, default=None):
             if key in strategy_config:
                 return strategy_config[key]
             return strategy_config.get("parameters", {}).get(key, default)
-        
+
         strategy_context = SimpleNamespace(
             name=strategy_name,
             config=strategy_config,
             get_required_timeframes=lambda: ["1h"],
             get_required_columns=lambda: ["open", "high", "low", "close", "volume"],
-            get_parameter=get_parameter
+            get_parameter=get_parameter,
         )
 
         data = load_data_for_strategy(strategy_context, time_range, end_date)
@@ -273,7 +282,7 @@ def run_strategy_analysis(
 
         # Get default and optimized parameters
         default_params = strategy_config.get("parameters", {})
-        
+
         # Optimization (if needed for analysis type)
         optimized_params = default_params.copy()
         optimization_results = {}
@@ -284,7 +293,7 @@ def run_strategy_analysis(
             )
             if optimization_results.get("best_params"):
                 optimized_params.update(optimization_results["best_params"])
-        
+
         results = {}
 
         # Monte Carlo only mode
@@ -294,11 +303,11 @@ def run_strategy_analysis(
                 primary_data, strategy_name, optimized_params
             )
             results["monte_carlo"] = monte_carlo_results
-            
+
             # Run backtest for comparison
             portfolio_results = run_full_backtest(data, strategy_name, optimized_params)
             results["optimized_portfolios"] = portfolio_results
-            
+
             # Visualization
             print("\n📊 Generating Monte Carlo Plots")
             flattened = {
@@ -307,32 +316,32 @@ def run_strategy_analysis(
                 for t, p in tfs.items()
             }
             plot_comprehensive_analysis(
-                flattened, 
-                strategy_config["name"], 
-                mc_results=monte_carlo_results
+                flattened, strategy_config["name"], mc_results=monte_carlo_results
             )
-            
+
             return {"success": True, "results": results}
 
         # Walk-Forward only mode
         if analysis_type == "walkforward":
             print("\n📈 Walk-Forward Analysis")
-            
+
             # Create simple strategy context for walk-forward using SimpleNamespace
             from types import SimpleNamespace
-            
+
             optimized_strategy = SimpleNamespace(
                 name=strategy_name,
                 parameters=optimized_params,
-                get_required_timeframes=lambda: ["1h"]
+                get_required_timeframes=lambda: ["1h"],
             )
-            walkforward_results = run_walkforward_analysis(optimized_strategy, primary_data)
+            walkforward_results = run_walkforward_analysis(
+                optimized_strategy, primary_data
+            )
             results["walkforward"] = walkforward_results
-            
+
             # Run backtest for comparison
             portfolio_results = run_full_backtest(data, strategy_name, optimized_params)
             results["optimized_portfolios"] = portfolio_results
-            
+
             # Visualization
             print("\n📊 Generating Walk-Forward Plots")
             flattened = {
@@ -340,16 +349,16 @@ def run_strategy_analysis(
                 for s, tfs in portfolio_results.items()
                 for t, p in tfs.items()
             }
-            plot_comprehensive_analysis(flattened, strategy_config["name"], wf_results=walkforward_results)
-            
+            plot_comprehensive_analysis(
+                flattened, strategy_config["name"], wf_results=walkforward_results
+            )
+
             return {"success": True, "results": results}
 
         # Full analysis mode
         # Default performance
         print("\n🔧 Default Strategy Performance")
-        default_results = run_full_backtest(
-            data, strategy_name, default_params
-        )
+        default_results = run_full_backtest(data, strategy_name, default_params)
         results["default_portfolios"] = default_results
         results["optimization"] = optimization_results
 
@@ -362,11 +371,11 @@ def run_strategy_analysis(
 
         # Create simple strategy context for walk-forward using SimpleNamespace
         from types import SimpleNamespace
-        
+
         optimized_strategy = SimpleNamespace(
             name=strategy_name,
             parameters=optimized_params,
-            get_required_timeframes=lambda: ["1h"]
+            get_required_timeframes=lambda: ["1h"],
         )
         walkforward_results = run_walkforward_analysis(optimized_strategy, primary_data)
         results["walkforward"] = walkforward_results
@@ -432,15 +441,15 @@ def get_user_inputs() -> Tuple[Optional[str], Optional[str], Optional[str], bool
 
     # Simplified time range selection
     print("\n📅 Time Range:")
-    print("1. 3 months (default)")
+    print("1. 3 months")
     print("2. 6 months")
     print("3. 1 year")
-    print("4. 2 years")
+    print("4. 2 years (default)")
     print("5. Full dataset")
 
-    time_choice = input("Select (Enter for 3m): ").strip() or "1"
+    time_choice = input("Select (Enter for 2y): ").strip() or "4"
     time_map = {"1": "3m", "2": "6m", "3": "1y", "4": "2y", "5": None}
-    time_range = time_map.get(time_choice, "3m")
+    time_range = time_map.get(time_choice, "2y")
 
     # Simplified mode selection
     print("\n⚙️ Analysis Mode:")
@@ -450,7 +459,7 @@ def get_user_inputs() -> Tuple[Optional[str], Optional[str], Optional[str], bool
     print("4. Walk-Forward only")
 
     mode_choice = input("Select (Enter for quick): ").strip() or "1"
-    
+
     if mode_choice == "1":
         return strategy_name, time_range, None, True, "full"
     elif mode_choice == "3":
@@ -470,7 +479,9 @@ def main():
     if not strategy_name:
         return
 
-    results = run_strategy_analysis(strategy_name, fast_mode, time_range, end_date, analysis_type)
+    results = run_strategy_analysis(
+        strategy_name, fast_mode, time_range, end_date, analysis_type
+    )
 
     if results["success"]:
         print("✅ Analysis completed successfully!")
@@ -480,11 +491,18 @@ def main():
     return results
 
 
-def quick_test(strategy_name: str, time_range: str = "1y", fast_mode: bool = True, analysis_type: str = "full"):
+def quick_test(
+    strategy_name: str,
+    time_range: str = "1y",
+    fast_mode: bool = True,
+    analysis_type: str = "full",
+):
     """Quick test function."""
     mode_desc = "fast" if fast_mode else analysis_type
     print(f"🧪 Quick Test: {strategy_name} ({time_range}, {mode_desc})")
-    results = run_strategy_analysis(strategy_name, fast_mode, time_range, analysis_type=analysis_type)
+    results = run_strategy_analysis(
+        strategy_name, fast_mode, time_range, analysis_type=analysis_type
+    )
     print(
         "✅ Test completed!"
         if results["success"]
@@ -495,11 +513,13 @@ def quick_test(strategy_name: str, time_range: str = "1y", fast_mode: bool = Tru
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--quick":
         if len(sys.argv) < 3:
-            print("Usage: python main.py --quick <strategy_name> [--full|--monte-carlo|--walkforward]")
+            print(
+                "Usage: python main.py --quick <strategy_name> [--full|--monte-carlo|--walkforward]"
+            )
             sys.exit(1)
-        
+
         strategy = sys.argv[2]
-        
+
         # Determine analysis type from flags
         if "--monte-carlo" in sys.argv:
             quick_test(strategy, "1y", False, "monte_carlo")

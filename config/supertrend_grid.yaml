@@ -12,6 +12,8 @@ parameters:
 data_source: "csv"
 csv_path: 
   - "data/BTCUSD_1h_2011-2025.csv"
+  - "data/EURUSD_1H_2009-2025.csv"
+  - "data/ETH_1h_2017-2020.csv"
 
 optimization_grid:  
   st_period: [7, 21, 7]

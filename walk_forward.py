@@ -56,7 +56,7 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
     
     expanded_grid = expand_parameter_grid(param_grid)
     
-    # Get price data
+    # Get price data for window calculations
     if isinstance(data, pd.DataFrame) and 'close' in data.columns:
         price = data['close']
     else:
@@ -87,13 +87,19 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
         train_data = price.iloc[start_idx:train_end]
         test_data = price.iloc[train_end:test_end]
         
-        # Convert to DataFrame if needed
-        if isinstance(train_data, pd.Series):
-            train_df = pd.DataFrame({'close': train_data})
-            test_df = pd.DataFrame({'close': test_data})
+        # Convert to DataFrame if needed - preserve OHLCV structure
+        if isinstance(data, pd.DataFrame) and all(col in data.columns for col in ['open', 'high', 'low', 'close']):
+            # Use full OHLCV data
+            train_df = data.iloc[start_idx:train_end]
+            test_df = data.iloc[train_end:test_end]
         else:
-            train_df = train_data
-            test_df = test_data
+            # Fallback to close-only data
+            if isinstance(train_data, pd.Series):
+                train_df = pd.DataFrame({'close': train_data})
+                test_df = pd.DataFrame({'close': test_data})
+            else:
+                train_df = train_data
+                test_df = test_data
         
         # Optimize on train set
         best_params, train_sharpe = optimize_window(
@@ -115,7 +121,8 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
         
         # Benchmark: hold
         try:
-            hold_portfolio = vbt.Portfolio.from_holding(test_df['close'], freq='1H')
+            close_col = test_df['close'] if 'close' in test_df.columns else test_df.iloc[:, 0]
+            hold_portfolio = vbt.Portfolio.from_holding(close_col, freq='1H')
             hold_stats = hold_portfolio.stats()
             if hold_stats is not None:
                 sharpe_value = hold_stats.get('Sharpe Ratio', 0.0)
@@ -218,8 +225,14 @@ def simple_walkforward(strategy, data: pd.DataFrame) -> Dict[str, Any]:
         price = data
     
     split_point = int(len(price) * SIMPLE_WALKFORWARD_TRAIN_RATIO)
-    train_data = pd.DataFrame({'close': price.iloc[:split_point]})
-    test_data = pd.DataFrame({'close': price.iloc[split_point:]})
+    
+    # Preserve OHLCV structure if available
+    if isinstance(data, pd.DataFrame) and all(col in data.columns for col in ['open', 'high', 'low', 'close']):
+        train_data = data.iloc[:split_point]
+        test_data = data.iloc[split_point:]
+    else:
+        train_data = pd.DataFrame({'close': price.iloc[:split_point]})
+        test_data = pd.DataFrame({'close': price.iloc[split_point:]})
     
     train_pf = create_portfolio(strategy.name, train_data, strategy.parameters)
     test_pf = create_portfolio(strategy.name, test_data, strategy.parameters)

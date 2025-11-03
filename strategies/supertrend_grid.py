@@ -32,6 +32,12 @@ def create_portfolio(data: pd.DataFrame, params: Dict = None) -> "vbt.Portfolio"
     # Calculate Supertrend using pandas-ta
     supertrend_data = ta.supertrend(high, low, close, length=st_period, multiplier=st_multiplier)
     
+    # Check if supertrend calculation was successful
+    if supertrend_data is None or supertrend_data.empty:
+        print(f"⚠️ Supertrend calculation failed - insufficient data or invalid parameters")
+        print(f"   Data length: {len(close)}, Period: {st_period}, Multiplier: {st_multiplier}")
+        return None
+    
     # Extract supertrend and direction
     supertrend = supertrend_data.iloc[:, 0]
     trend_direction = supertrend_data.iloc[:, 1]
@@ -48,9 +54,8 @@ def create_portfolio(data: pd.DataFrame, params: Dict = None) -> "vbt.Portfolio"
     last_sell_price = 0.0
     grid_levels_array = np.array([])
     
-    # Generate signals with safety limit
-    max_iterations = min(1000, len(close))  # Safety limit
-    for i in range(1, max_iterations):
+    # Generate signals for all data points
+    for i in range(1, len(close)):
         current_price = close.iloc[i]
         
         # Entry signal - Supertrend bullish crossover

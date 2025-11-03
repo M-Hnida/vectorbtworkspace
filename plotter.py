@@ -131,33 +131,12 @@ def _plot_monte_carlo(mc_results: Dict[str, Any]) -> None:
 def _add_histogram(fig: go.Figure, returns_data: list, statistics: dict) -> None:
     """Add histogram of Monte Carlo returns."""
     fig.add_trace(go.Histogram(
-        x=returns_data,
-        nbinsx=30,
-        name='MC Returns',
-        marker_color='lightblue'
+        x=returns_data, nbinsx=30, name='MC Returns', marker_color='lightblue'
     ), row=1, col=1)
 
-    actual_return = statistics.get('actual_return')
-    if actual_return:
-        fig.add_vline(
-            x=actual_return, 
-            line_dash="dash", 
-            line_color="red",
-            annotation_text=f"Strategy: {actual_return:.2f}%",
-            row=1, col=1
-        )
-
-
-def _calculate_parameter_importance(param_names: list, param_data: dict, returns: pd.Series) -> list:
-    """Calculate parameter importance using Spearman correlation."""
-    scores = []
-    for name in param_names:
-        vals = pd.Series(param_data[name])
-        mask = ~(vals.isna() | returns.isna())
-        if mask.sum() >= 3:
-            corr = float(returns[mask].corr(vals[mask], method='spearman'))
-            scores.append((name, abs(corr)))
-    return scores
+    if actual_return := statistics.get('actual_return'):
+        fig.add_vline(x=actual_return, line_dash="dash", line_color="red",
+                     annotation_text=f"Strategy: {actual_return:.2f}%")
 
 
 def _extract_parameter_data(simulations: list) -> Optional[dict]:
@@ -165,53 +144,47 @@ def _extract_parameter_data(simulations: list) -> Optional[dict]:
     if not simulations:
         return None
     
-    # Find first simulation with parameters
     first_sim = next((s for s in simulations if isinstance(s, dict) and 'parameters' in s), None)
-    if not first_sim:
+    if not first_sim or not (param_names := list(first_sim.get('parameters', {}).keys())):
         return None
     
-    param_names = list(first_sim.get('parameters', {}).keys())
-    if not param_names:
-        return None
-    
-    # Initialize data structure
     param_data = {name: [] for name in param_names}
     param_data['returns'] = []
     
-    # Extract data from all simulations
     for sim in simulations:
-        if not isinstance(sim, dict) or 'total_return' not in sim:
+        if not isinstance(sim, dict) or 'total_return' not in sim or not sim.get('parameters'):
             continue
-            
-        parameters = sim.get('parameters', {})
-        if not parameters:
-            continue
-            
-        # Add parameter values (default to 0 if missing)
+        parameters = sim['parameters']
         for name in param_names:
             param_data[name].append(parameters.get(name, 0))
         param_data['returns'].append(sim['total_return'])
     
-    # Return None if no returns were found
     return param_data if param_data['returns'] else None
 
 
 def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
     """Add parameter sensitivity panel with simplified logic."""
-    if not simulations:
-        return
-
     param_data = _extract_parameter_data(simulations)
     if not param_data:
         return
 
     param_names = [n for n in param_data.keys() if n != 'returns']
     returns = pd.Series(param_data['returns'], dtype=float)
-    if len(param_names) == 0 or returns.empty:
+    if not param_names or returns.empty:
         return
 
     # Calculate parameter importance using Spearman correlation
-    scores = _calculate_parameter_importance(param_names, param_data, returns)
+    scores = []
+    for name in param_names:
+        vals = pd.Series(param_data[name])
+        mask = ~(vals.isna() | returns.isna())
+        if mask.sum() >= 3:
+            try:
+                corr = float(returns[mask].corr(vals[mask], method='spearman'))
+                scores.append((name, abs(corr)))
+            except Exception:
+                continue
+    
     if not scores:
         return
         
@@ -219,73 +192,28 @@ def _add_parameter_sensitivity(fig: go.Figure, simulations: list) -> None:
     names, vals = zip(*scores)
     
     # Add parameter importance bar chart
-    fig.add_trace(go.Bar(
-        x=[str(n) for n in names],
-        y=list(vals),
-        marker_color='cornflowerblue',
-        name='Param Importance (|Spearman|)'
-    ), row=1, col=2)
+    fig.add_trace(go.Bar(x=[str(n) for n in names], y=list(vals), 
+                        marker_color='cornflowerblue', name='Param Importance (|Spearman|)'), row=1, col=2)
     fig.update_yaxes(title_text="|Spearman|", row=1, col=2)
 
-    # Top parameter violin plot
-    top_param = scores[0][0]
-    top_vals = pd.Series(param_data[top_param])
-    mask = ~(top_vals.isna() | returns.isna())
-    if mask.sum() >= 5:
-        q = pd.qcut(top_vals[mask], q=min(5, mask.sum()), duplicates='drop')
-        grouped = pd.DataFrame({'bin': q.astype(str), 'ret': returns[mask].values})
-        med = grouped.groupby('bin')['ret'].median().sort_values()
-        ordered_bins = list(med.index)
-        
-        for b in ordered_bins:
-            vals = grouped[grouped['bin'] == b]['ret'].values
-            if len(vals) == 0:
-                continue
-            label = f"{top_param} {b}"
-            fig.add_trace(go.Violin(
-                y=vals,
-                x=[label]*len(vals),
-                name=label,
-                line_color='lightblue',
-                meanline_visible=True,
-                showlegend=False
-            ), row=1, col=2)
-        fig.update_yaxes(title_text="Return (%)", row=1, col=2)
-
     # 2D heatmap for exactly two varying params
-    varying = [n for n in param_names if len(set([v for v in param_data[n] if v is not None])) > 1]
+    varying = [n for n in param_names if len(set(v for v in param_data[n] if v is not None)) > 1]
     if len(varying) == 2:
         x_param, y_param = varying
-        x_vals = pd.Series(param_data[x_param])
-        y_vals = pd.Series(param_data[y_param])
+        x_vals, y_vals = pd.Series(param_data[x_param]), pd.Series(param_data[y_param])
         mask = ~(x_vals.isna() | y_vals.isna() | returns.isna())
         if mask.sum() >= 4:
-            df = pd.DataFrame({
-                'x': x_vals[mask].values,
-                'y': y_vals[mask].values,
-                'ret': returns[mask].values
-            })
+            df = pd.DataFrame({'x': x_vals[mask].values, 'y': y_vals[mask].values, 'ret': returns[mask].values})
             
             def bucket(s):
-                uniq = np.unique(s)
-                if len(uniq) > 12:
-                    return pd.qcut(s, q=8, duplicates='drop').astype(str)
-                return s.astype(str)
-            
+                return pd.qcut(s, q=8, duplicates='drop').astype(str) if len(np.unique(s)) > 12 else s.astype(str)
             df['xb'] = bucket(pd.Series(df['x']))
             df['yb'] = bucket(pd.Series(df['y']))
-            piv = df.groupby(['yb', 'xb'])['ret'].mean().reset_index()
-            piv_pivot = piv.pivot(index='yb', columns='xb', values='ret')
+            piv_pivot = df.groupby(['yb', 'xb'])['ret'].mean().reset_index().pivot(index='yb', columns='xb', values='ret')
             
-            fig.add_trace(go.Heatmap(
-                z=piv_pivot.values,
-                x=[str(c) for c in piv_pivot.columns],
-                y=[str(i) for i in piv_pivot.index],
-                colorscale='RdYlGn',
-                colorbar=dict(title="Mean Return (%)"),
-                name='Param Heatmap',
-                showscale=True
-            ), row=1, col=2)
+            fig.add_trace(go.Heatmap(z=piv_pivot.values, x=[str(c) for c in piv_pivot.columns],
+                                   y=[str(i) for i in piv_pivot.index], colorscale='RdYlGn',
+                                   colorbar=dict(title="Mean Return (%)"), name='Param Heatmap', showscale=True), row=1, col=2)
             fig.update_xaxes(title_text=str(x_param), row=1, col=2)
             fig.update_yaxes(title_text=str(y_param), row=1, col=2)
 
@@ -383,44 +311,23 @@ def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
     categories = ['Random\nMean', 'Strategy', 'Random\n+1σ', 'Random\n-1σ']
     colors = ['lightgray', 'red', 'lightgreen', 'orange']
 
-    # Add all bar traces in a loop
-    bar_configs = zip(categories, values, colors, [True, True, False, False])
-    for category, val, color, showlegend in bar_configs:
-        text_position = 'outside' if abs(val) < 1 else 'inside'
-        text_color = 'white' if text_position == 'inside' else color
+    for category, val, color, showlegend in zip(categories, values, colors, [True, True, False, False]):
+        fig.add_trace(go.Bar(x=[category], y=[val], marker_color=color,
+                           name=category.replace('\n', ' ') if showlegend else None, showlegend=showlegend,
+                           text=f'{val:.2f}%', textposition='outside' if abs(val) < 1 else 'inside',
+                           textfont={'color': 'white' if abs(val) >= 1 else color, 'size': 10}), row=2, col=2)
 
-        fig.add_trace(go.Bar(
-            x=[category], y=[val], marker_color=color,
-            name=category.replace('\n', ' ') if showlegend else None,
-            showlegend=showlegend,
-            text=f'{val:.2f}%',
-            textposition=text_position,
-            textfont={'color': text_color, 'size': 10}
-        ), row=2, col=2)
+    fig.add_shape(type="line", x0=-0.5, x1=3.5, y0=0, y1=0, line={"dash": "dot", "color": "white", "width": 1}, xref="x4", yref="y4")
 
-    fig.add_shape(
-        type="line", x0=-0.5, x1=3.5, y0=0, y1=0,
-        line={"dash": "dot", "color": "white", "width": 1},
-        xref="x4", yref="y4"
-    )
-
-    vmax = float(np.nanmax(values))
-    vmin = float(np.nanmin(values))
-    if vmax == vmin:
-        pad = 1.0 or abs(vmax) * 0.15
-        ymin, ymax = vmin - pad, vmax + pad
-    else:
-        span = vmax - vmin
-        pad = span * 0.15
-        ymin, ymax = vmin - pad, vmax + pad
+    vmax, vmin = float(np.nanmax(values)), float(np.nanmin(values))
+    pad = 1.0 if vmax == vmin else (vmax - vmin) * 0.15
+    ymin, ymax = vmin - pad, vmax + pad
     fig.update_yaxes(range=[ymin, ymax], row=2, col=2)
 
     performance_text = "Outperforming" if actual_return > mean_random else "Underperforming"
-    fig.add_annotation(
-        x=1.5, y=ymax - (ymax - ymin) * 0.08, text=f"Strategy is {performance_text} vs Random",
-        showarrow=False, xref="x4", yref="y4", font=dict(size=11, color="white"),
-        bgcolor="rgba(0,0,0,0.5)", bordercolor="white", borderwidth=1
-    )
+    fig.add_annotation(x=1.5, y=ymax - (ymax - ymin) * 0.08, text=f"Strategy is {performance_text} vs Random",
+                      showarrow=False, xref="x4", yref="y4", font=dict(size=11, color="white"),
+                      bgcolor="rgba(0,0,0,0.5)", bordercolor="white", borderwidth=1)
 
 
 def _print_mc_summary(statistics: dict) -> None:
@@ -431,16 +338,10 @@ def _print_mc_summary(statistics: dict) -> None:
     mean_random = statistics.get('mean_return', 0)
     std_random = statistics.get('std_return', 0)
     
-    # Print strategy return info
-    if actual_return:
-        print(f"   Strategy Return: {actual_return:.3f}%")
-    else:
-        print("   No strategy return available")
-        
+    print(f"   Strategy Return: {actual_return:.3f}%" if actual_return else "   No strategy return available")
     print(f"   Random Mean: {mean_random:.3f}% ± {std_random:.3f}%")
     print(f"   Random Range: [{mean_random - std_random:.3f}%, {mean_random + std_random:.3f}%]")
     
-    # Print performance comparison
     if actual_return is not None and mean_random is not None:
         outperformance = actual_return - mean_random
         performance_desc = 'Better' if outperformance > 0 else 'Worse'
@@ -472,55 +373,33 @@ def _plot_single_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]
     windows = wf_results['windows']
     
     window_nums = [w['window'] for w in windows]
-    train_returns = [w['train_stats'].get('Total Return [%]', 0) for w in windows]
-    test_returns = [w['test_stats'].get('Total Return [%]', 0) for w in windows]
-    train_sharpes = [w['train_stats'].get('Sharpe Ratio', 0) for w in windows]
-    test_sharpes = [w['test_stats'].get('Sharpe Ratio', 0) for w in windows]
+    train_sharpes = [w.get('train_sharpe', 0) for w in windows]
+    test_sharpes = [w.get('test_sharpe', 0) for w in windows]
 
-    rolling_sharpe_train = [item for w in windows if 'rolling_sharpe_train' in w for item in w['rolling_sharpe_train']]
-    rolling_sharpe_test = [item for w in windows if 'rolling_sharpe_test' in w for item in w['rolling_sharpe_test']]
+    fig = make_subplots(rows=2, cols=2, subplot_titles=['Sharpe by Window', 'Train vs Test Sharpe', 'Performance Degradation', 'Window Summary'])
 
-    has_rolling = rolling_sharpe_train or rolling_sharpe_test
-    rows, cols = (3, 2) if has_rolling else (2, 2)
-    subplot_titles = ['Returns by Window (%)', 'Sharpe Ratio by Window', 'Train vs Test Returns', 'Train vs Test Sharpe']
-    if has_rolling:
-        subplot_titles.extend(['Rolling Sharpe Evolution', 'Performance Degradation'])
+    # Add traces
+    for x, y, name, row, col, mode in [
+        (window_nums, train_sharpes, 'Train Sharpe', 1, 1, 'lines+markers'),
+        (window_nums, test_sharpes, 'Test Sharpe', 1, 1, 'lines+markers'),
+        (train_sharpes, test_sharpes, 'Sharpe Correlation', 1, 2, 'markers')
+    ]:
+        fig.add_trace(go.Scatter(x=x, y=y, mode=mode, name=name), row=row, col=col)
 
-    fig = make_subplots(rows=rows, cols=cols, subplot_titles=subplot_titles)
+    # Add diagonal reference line
+    if train_sharpes and test_sharpes:
+        all_values = list(train_sharpes) + list(test_sharpes)
+        min_val, max_val = min(all_values), max(all_values)
+        fig.add_trace(go.Scatter(x=[min_val, max_val], y=[min_val, max_val], mode='lines',
+                               line={'dash': 'dash', 'color': 'gray'}, name='Perfect Correlation', showlegend=False), row=1, col=2)
 
-    # Add line/point traces
-    trace_configs = [
-        (window_nums, train_returns, 'Train Returns', 1, 1, 'lines+markers'),
-        (window_nums, test_returns, 'Test Returns', 1, 1, 'lines+markers'),
-        (window_nums, train_sharpes, 'Train Sharpe', 1, 2, 'lines+markers'),
-        (window_nums, test_sharpes, 'Test Sharpe', 1, 2, 'lines+markers'),
-        (train_returns, test_returns, 'Returns Correlation', 2, 1, 'markers'),
-        (train_sharpes, test_sharpes, 'Sharpe Correlation', 2, 2, 'markers')
-    ]
+    # Performance degradation
+    degradation = [test - train for train, test in zip(train_sharpes, test_sharpes)]
+    fig.add_trace(go.Scatter(x=window_nums, y=degradation, mode='lines+markers', name='Performance Degradation'), row=2, col=1)
+    fig.add_shape(type="line", x0=min(window_nums), x1=max(window_nums), y0=0, y1=0,
+                 line={"dash": "dash", "color": "gray"}, xref="x4", yref="y4")
 
-    for x, y, name, row, col, mode in trace_configs:
-        showlegend = 'Sharpe' not in name or 'Train' in name
-        fig.add_trace(go.Scatter(x=x, y=y, mode=mode, name=name, showlegend=showlegend), row=row, col=col)
-
-    _add_diagonal_lines(fig, train_returns, test_returns, 2, 1)
-    _add_diagonal_lines(fig, train_sharpes, test_sharpes, 2, 2)
-
-    # Add rolling sharpe traces if available
-    if has_rolling and rows > 2:
-        if rolling_sharpe_train:
-            fig.add_trace(go.Scatter(y=rolling_sharpe_train, mode='lines', name='Rolling Sharpe (Train)'), row=3, col=1)
-        if rolling_sharpe_test:
-            fig.add_trace(go.Scatter(y=rolling_sharpe_test, mode='lines', name='Rolling Sharpe (Test)'), row=3, col=1)
-
-        degradation = [test - train for train, test in zip(train_returns, test_returns)]
-        fig.add_trace(go.Scatter(x=window_nums, y=degradation, mode='lines+markers', name='Performance Degradation'), row=3, col=2)
-        fig.add_shape(type="line", x0=min(window_nums), x1=max(window_nums), y0=0, y1=0,
-                     line={"dash": "dash", "color": "gray"}, xref="x6", yref="y6")
-
-    fig.update_layout(
-        title_text="Walk-Forward Analysis - VectorBT Enhanced Performance Stability",
-        template='plotly_dark', showlegend=True
-    )
+    fig.update_layout(title_text="Walk-Forward Analysis - VectorBT Enhanced Performance Stability", template='plotly_dark')
     fig.show()
     return {"success": True}
 
@@ -534,86 +413,33 @@ def _plot_multi_asset_walkforward(wf_results: Dict[str, Any]) -> Dict[str, Any]:
     if not asset_names:
         return _plot_single_asset_walkforward(wf_results)
 
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=(
-            'Train Returns by Asset (%)', 'Test Returns by Asset (%)',
-            'Train vs Test Comparison', 'Asset Performance Ranking'
-        )
-    )
-
+    fig = make_subplots(rows=2, cols=2, subplot_titles=('Train Returns by Asset (%)', 'Test Returns by Asset (%)', 'Train vs Test Comparison', 'Asset Performance Ranking'))
     window_nums = [w['window'] for w in windows]
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
 
-    _plot_asset_returns(fig, windows, asset_names, window_nums, colors)
-    _plot_asset_ranking(fig, windows[-1], asset_names)
-
-    fig.update_layout(
-        title_text="Multi-Asset Walk-Forward Analysis - VectorBT Enhanced",
-        template='plotly_dark', showlegend=True
-    )
-    fig.show()
-    return {"success": True}
-
-
-def _plot_asset_returns(fig: go.Figure, windows: list, asset_names: list,
-                       window_nums: list, colors: list) -> None:
-    """Plot asset returns for multi-asset walkforward analysis."""
+    # Plot asset returns
     for i, asset in enumerate(asset_names):
         color = colors[i % len(colors)]
         train_returns = [w.get('asset_results', {}).get(asset, {}).get('train_return', 0) for w in windows]
         test_returns = [w.get('asset_results', {}).get(asset, {}).get('test_return', 0) for w in windows]
 
-        # Add traces for train and test returns
-        fig.add_trace(go.Scatter(
-            x=window_nums, y=train_returns, mode='lines+markers',
-            name=f'{asset} Train', line={"color": color, "width": 2}
-        ), row=1, col=1)
+        fig.add_trace(go.Scatter(x=window_nums, y=train_returns, mode='lines+markers', name=f'{asset} Train', line={"color": color, "width": 2}), row=1, col=1)
+        fig.add_trace(go.Scatter(x=window_nums, y=test_returns, mode='lines+markers', name=f'{asset} Test', line={"color": color, "width": 2, "dash": "dash"}), row=1, col=2)
+        fig.add_trace(go.Scatter(x=train_returns, y=test_returns, mode='markers', name=f'{asset}', marker={"color": color, "size": 8}, showlegend=False), row=2, col=1)
 
-        fig.add_trace(go.Scatter(
-            x=window_nums, y=test_returns, mode='lines+markers',
-            name=f'{asset} Test', line={"color": color, "width": 2, "dash": "dash"}
-        ), row=1, col=2)
-
-        # Add scatter plot for train vs test comparison
-        fig.add_trace(go.Scatter(
-            x=train_returns, y=test_returns, mode='markers',
-            name=f'{asset}', marker={"color": color, "size": 8}, showlegend=False
-        ), row=2, col=1)
-
-
-def _plot_asset_ranking(fig: go.Figure, final_window: dict, asset_names: list) -> None:
-    """Plot asset performance ranking."""
-    asset_performance = []
-    
-    for asset in asset_names:
-        asset_data = final_window.get('asset_results', {}).get(asset, {})
-        test_return = asset_data.get('test_return', 0)
-        asset_performance.append((asset, test_return))
-
+    # Asset ranking
+    final_window = windows[-1]
+    asset_performance = [(asset, final_window.get('asset_results', {}).get(asset, {}).get('test_return', 0)) for asset in asset_names]
     asset_performance.sort(key=lambda x: x[1], reverse=True)
     assets_sorted, returns_sorted = zip(*asset_performance)
+    fig.add_trace(go.Bar(x=list(assets_sorted), y=list(returns_sorted), name='Final Test Returns'), row=2, col=2)
 
-    fig.add_trace(
-        go.Bar(
-            x=list(assets_sorted), y=list(returns_sorted),
-            name='Final Test Returns'
-        ), row=2, col=2
-    )
+    fig.update_layout(title_text="Multi-Asset Walk-Forward Analysis - VectorBT Enhanced", template='plotly_dark', showlegend=True)
+    fig.show()
+    return {"success": True}
 
 
-def _add_diagonal_lines(fig, x_data, y_data, row, col) -> None:
-    """Add diagonal reference lines to scatter plots."""
-    if not x_data or not y_data:
-        return
 
-    all_values = list(x_data) + list(y_data)
-    min_val, max_val = min(all_values), max(all_values)
-
-    fig.add_trace(go.Scatter(
-        x=[min_val, max_val], y=[min_val, max_val], mode='lines',
-        line={'dash': 'dash', 'color': 'gray'}, name='Perfect Correlation', showlegend=False
-    ), row=row, col=col)
 
 
 def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[str, Any]:
@@ -626,45 +452,15 @@ def create_comparison_plot(results: Dict[str, Any], strategy_name: str) -> Dict[
             return {"success": False, "reason": "missing_stats"}
 
         metrics_names = ['Total Return (%)', 'Sharpe Ratio', 'Max Drawdown (%)', 'Win Rate (%)', 'Total Trades']
+        keys = ['Total Return [%]', 'Sharpe Ratio', 'Max Drawdown [%]', 'Win Rate [%]', 'Total Trades']
         
-        # Extract values using a helper function
-        def extract_values(stats, keys):
-            return [
-                float(stats.get(keys[0], 0)),  # Total Return
-                float(stats.get(keys[1], 0)),  # Sharpe Ratio
-                float(stats.get(keys[2], 0)),  # Max Drawdown
-                float(stats.get(keys[3], 0)),  # Win Rate
-                int(stats.get(keys[4], 0))     # Total Trades
-            ]
-        
-        default_values = extract_values(default_stats, ['Total Return [%]', 'Sharpe Ratio', 'Max Drawdown [%]', 'Win Rate [%]', 'Total Trades'])
-        optimized_values = extract_values(optimized_stats, ['Total Return [%]', 'Sharpe Ratio', 'Max Drawdown [%]', 'Win Rate [%]', 'Total Trades'])
+        default_values = [float(default_stats.get(k, 0)) if i < 4 else int(default_stats.get(k, 0)) for i, k in enumerate(keys)]
+        optimized_values = [float(optimized_stats.get(k, 0)) if i < 4 else int(optimized_stats.get(k, 0)) for i, k in enumerate(keys)]
 
         fig = go.Figure()
-        
-        fig.add_trace(go.Bar(
-            name='Default Parameters',
-            x=metrics_names,
-            y=default_values,
-            marker_color='lightblue',
-            opacity=0.7
-        ))
-        
-        fig.add_trace(go.Bar(
-            name='Optimized Parameters',
-            x=metrics_names,
-            y=optimized_values,
-            marker_color='red',
-            opacity=0.7
-        ))
-
-        fig.update_layout(
-            title=f'{strategy_name} Strategy: Default vs Optimized Parameters',
-            xaxis_title='Metrics',
-            yaxis_title='Values',
-            barmode='group',
-            template='plotly_dark'
-        )
+        fig.add_trace(go.Bar(name='Default Parameters', x=metrics_names, y=default_values, marker_color='lightblue', opacity=0.7))
+        fig.add_trace(go.Bar(name='Optimized Parameters', x=metrics_names, y=optimized_values, marker_color='red', opacity=0.7))
+        fig.update_layout(title=f'{strategy_name} Strategy: Default vs Optimized Parameters', xaxis_title='Metrics', yaxis_title='Values', barmode='group', template='plotly_dark')
         fig.show()
 
         print("\nOptimization Impact Summary:")
@@ -693,17 +489,12 @@ def _extract_portfolios_from_results(results: Dict[str, Any]) -> Dict[str, Any]:
     """Extract portfolios from results structure."""
     portfolios = {}
     
-    if 'default_backtest' in results:
-        for symbol, timeframes in results['default_backtest'].items():
-            for timeframe, portfolio in timeframes.items():
-                if hasattr(portfolio, 'stats'):
-                    portfolios[f"{symbol}_{timeframe}_default"] = portfolio
-
-    if 'full_backtest' in results:
-        for symbol, timeframes in results['full_backtest'].items():
-            for timeframe, portfolio in timeframes.items():
-                if hasattr(portfolio, 'stats'):
-                    portfolios[f"{symbol}_{timeframe}_optimized"] = portfolio
+    for key, suffix in [('default_backtest', '_default'), ('full_backtest', '_optimized')]:
+        if key in results:
+            for symbol, timeframes in results[key].items():
+                for timeframe, portfolio in timeframes.items():
+                    if hasattr(portfolio, 'stats'):
+                        portfolios[f"{symbol}_{timeframe}{suffix}"] = portfolio
     
     return portfolios
 
