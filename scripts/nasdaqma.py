@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # %%
 # ===== CONFIGURATION =====
-MA_PERIOD = 225
+MA_PERIOD = 250
 TF = "4h"
 INITIAL_CASH = 1000
 FEE = 0.0004
@@ -22,8 +22,8 @@ FEE = 0.0004
 # Instead of fixed risk $, we target a specific Portfolio Volatility.
 # 0.30 (30%) is aggressive but standard for Tech/Crypto. 
 # It allows 100% exposure during normal times, but cuts risk during crashes.
-TARGET_VOLATILITY = 0.35 
-VOLATILITY_WINDOW = 5  # Lookback period to calculate current volatility
+TARGET_VOLATILITY = 0.25
+VOLATILITY_WINDOW = 10  # Lookback period to calculate current volatility
 
 # %%
 # ===== DATA PREPARATION =====
