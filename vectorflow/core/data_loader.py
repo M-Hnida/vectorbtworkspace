@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Union, Any
 from datetime import datetime, timedelta
 import pandas as pd
 import yaml
-from constants import REQUIRED_OHLCV_COLUMNS, REQUIRED_MINIMUM_COLUMNS
+from vectorflow.core.constants import REQUIRED_OHLCV_COLUMNS, REQUIRED_MINIMUM_COLUMNS
 
 # Time range parsing mappings
 TIME_UNITS = {"y": 365, "m": 30, "d": 1, "w": 7}

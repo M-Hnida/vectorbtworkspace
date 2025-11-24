@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vectorflow"
+version = "0.1.0"
+description = "Advanced Trading Strategy Framework with VectorBT"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "User", email = "user@example.com"}
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "vectorbt",
+    "plotly",
+    "scipy",
+    "pandas_ta",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+    "mypy",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vectorflow*"]

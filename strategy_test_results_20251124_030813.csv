@@ -1,0 +1,9 @@
+strategy,symbol,status,total_return,sharpe_ratio,max_drawdown,total_trades,error
+donchian,BTC,success,50.69342173471713,0.530262614998579,33.649019587519916,62,
+donchian,EURUSD,success,0.0,inf,0.0,0,
+grid,BTC,success,-72.14139414998172,0.9443972626414072,108.41793274613565,469,
+grid,EURUSD,success,6.661928969949588,0.7917622516805691,2.8163120940427113,23,
+risk_premia,BTC,success,0.0,inf,0.0,0,
+risk_premia,EURUSD,success,0.0,inf,0.0,0,
+supertrend_grid,BTC,success,128.15154856507877,0.6651926728779061,66.4177633993952,380,
+supertrend_grid,EURUSD,success,-59.62080160475374,-2.9369219558352406,61.96780488224496,451,

@@ -10,14 +10,14 @@ from typing import Dict
 
 import pandas as pd
 
-from constants import (
+from vectorflow.core.constants import (
     STAT_MAX_DRAWDOWN,
     STAT_SHARPE_RATIO,
     STAT_TOTAL_RETURN,
     STAT_TOTAL_TRADES,
 )
-from data_manager import load_ohlc_csv, load_strategy_config
-from strategy_registry import create_portfolio, get_available_strategies
+from vectorflow.core.data_loader import load_ohlc_csv, load_strategy_config
+from vectorflow.core.portfolio_builder import create_portfolio, get_available_strategies
 
 warnings.filterwarnings("ignore")
 

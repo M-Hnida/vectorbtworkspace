@@ -1,14 +1,8 @@
-"""Test path randomization MC with real Supertrend Grid strategy"""
-
-from monte_carlo_path import run_path_randomization_mc
-from plotter import plot_path_mc_results
-from strategy_registry import create_portfolio
-import pandas as pd
+from vectorflow.validation.path_randomization import run_path_randomization_mc
+from vectorflow.visualization.plotters import plot_path_mc_results
+from vectorflow.core.portfolio_builder import create_portfolio
 import numpy as np
-
-print("="*80)
-print("PATH MC - SUPERTREND GRID + REAL DATA")
-print("="*80)
+import pandas as pd
 
 # Load real data
 print("\n📊 Loading data...")

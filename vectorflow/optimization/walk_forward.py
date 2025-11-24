@@ -10,7 +10,7 @@ import vectorbt as vbt
 from typing import Dict, Any, Tuple
 from itertools import product
 
-from constants import (
+from vectorflow.core.constants import (
     TRAIN_WINDOW_DAYS,
     TEST_WINDOW_DAYS,
     MAX_WINDOWS,
@@ -43,8 +43,8 @@ def run_walkforward_analysis(strategy, data: pd.DataFrame) -> Dict[str, Any]:
     This helps detect overfitting - if train performance is much better
     than test performance, the strategy is likely overfit.
     """
-    from strategy_registry import create_portfolio, get_optimization_grid
-    from optimizer import expand_parameter_grid
+    from vectorflow.core.portfolio_builder import create_portfolio, get_optimization_grid
+    from vectorflow.optimization.grid_search import expand_parameter_grid
     
     print(f"📊 Walk-forward analysis on {len(data)} bars")
     
@@ -170,7 +170,7 @@ def optimize_window(strategy_name: str, data: pd.DataFrame, param_grid: Dict) ->
     Returns:
         Tuple of (best_params, best_sharpe)
     """
-    from strategy_registry import create_portfolio, get_default_parameters
+    from vectorflow.core.portfolio_builder import create_portfolio, get_default_parameters
     
     param_names = list(param_grid.keys())
     param_values = list(param_grid.values())
@@ -217,7 +217,7 @@ def optimize_window(strategy_name: str, data: pd.DataFrame, param_grid: Dict) ->
 
 def simple_walkforward(strategy, data: pd.DataFrame) -> Dict[str, Any]:
     """Simple 80/20 train/test split without optimization."""
-    from strategy_registry import create_portfolio
+    from vectorflow.core.portfolio_builder import create_portfolio
     
     if isinstance(data, pd.DataFrame) and 'close' in data.columns:
         price = data['close']

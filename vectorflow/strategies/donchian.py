@@ -61,16 +61,26 @@ def calculate_indicators(data: pd.DataFrame, params: Dict = None) -> pd.DataFram
     data['volume_ma'] = ta.sma(data['volume'], length=volume_ma_period)
 
     # SMA long on 4h timeframe (simulated by resampling)
-    data_4h = data.resample('4H').agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
-        'volume': 'sum'
-    })
-    sma_long_4h = ta.sma(data_4h['close'], length=sma_long_period)
-    # Forward fill to align with original timeframe
-    data['sma_long_4h'] = sma_long_4h.reindex(data.index, method='ffill')
+    try:
+        data_4h = data.resample('4H').agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        })
+        sma_long_4h = ta.sma(data_4h['close'], length=sma_long_period)
+        
+        # Handle None case (insufficient data for SMA)
+        if sma_long_4h is not None:
+            # Forward fill to align with original timeframe
+            data['sma_long_4h'] = sma_long_4h.reindex(data.index, method='ffill')
+        else:
+            # Fallback: use same timeframe SMA if 4H resample fails
+            data['sma_long_4h'] = ta.sma(data['close'], length=sma_long_period)
+    except Exception as e:
+        # If resampling fails (e.g., insufficient data), use 1h SMA as fallback
+        data['sma_long_4h'] = ta.sma(data['close'], length=sma_long_period)
 
     # Threshold values
     data['adx_threshold'] = adx_threshold

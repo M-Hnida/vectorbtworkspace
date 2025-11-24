@@ -294,130 +294,7 @@ def _block_bootstrap_method(returns: pd.Series, n_simulations: int, block_size: 
     }
 
 
-# Plotting has been moved to plotter.py
-# Use: from plotter import plot_path_mc_results
 
-# Example usage (moved to end of file for reference)
-    """
-    Plot path randomization Monte Carlo results.
-    
-    Args:
-        mc_results: Results from run_path_randomization_mc()
-    """
-    stats = mc_results['statistics']
-    mc_returns = mc_results['simulated_returns']
-    mc_sharpes = mc_results['simulated_sharpes']
-    equity_paths = mc_results.get('equity_paths')
-    
-    # Create subplots
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=(
-            'Return Distribution',
-            'Sharpe Ratio Distribution',
-            'Equity Paths (Sample)',
-            'Max Drawdown Distribution'
-        ),
-        specs=[[{"type": "histogram"}, {"type": "histogram"}],
-               [{"type": "scatter"}, {"type": "histogram"}]]
-    )
-    
-    # 1. Return distribution
-    fig.add_trace(
-        go.Histogram(
-            x=mc_returns,
-            name='MC Returns',
-            nbinsx=50,
-            marker_color='lightblue',
-            showlegend=False
-        ),
-        row=1, col=1
-    )
-    
-    # Add vertical line for original return
-    fig.add_vline(
-        x=stats['original_return'],
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Original: {stats['original_return']:.2f}%",
-        row=1, col=1
-    )
-    
-    # 2. Sharpe distribution
-    fig.add_trace(
-        go.Histogram(
-            x=mc_sharpes,
-            name='MC Sharpe',
-            nbinsx=50,
-            marker_color='lightgreen',
-            showlegend=False
-        ),
-        row=1, col=2
-    )
-    
-    fig.add_vline(
-        x=stats['original_sharpe'],
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Original: {stats['original_sharpe']:.3f}",
-        row=1, col=2
-    )
-    
-    # 3. Sample equity paths
-    if equity_paths is not None and len(equity_paths) > 0:
-        # Show first 100 paths
-        for equity in equity_paths[:100]:
-            fig.add_trace(
-                go.Scatter(
-                    y=equity,
-                    mode='lines',
-                    line=dict(color='lightgray', width=0.5),
-                    showlegend=False,
-                    opacity=0.3
-                ),
-                row=2, col=1
-            )
-    
-    # 4. Max Drawdown distribution
-    mc_max_dds = mc_results['simulated_max_dds']
-    fig.add_trace(
-        go.Histogram(
-            x=mc_max_dds,
-            name='MC Max DD',
-            nbinsx=50,
-            marker_color='salmon',
-            showlegend=False
-        ),
-        row=2, col=2
-    )
-    
-    fig.add_vline(
-        x=stats['original_max_dd'],
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Original: {stats['original_max_dd']:.2f}%",
-        row=2, col=2
-    )
-    
-    # Update layout
-    fig.update_layout(
-        title_text=f"Path Randomization Monte Carlo ({mc_results['n_simulations']} simulations)",
-        template='plotly_dark',
-        height=800,
-        showlegend=False
-    )
-    
-    fig.update_xaxes(title_text="Total Return (%)", row=1, col=1)
-    fig.update_xaxes(title_text="Sharpe Ratio", row=1, col=2)
-    fig.update_xaxes(title_text="Time", row=2, col=1)
-    fig.update_xaxes(title_text="Max Drawdown (%)", row=2, col=2)
-    
-    fig.update_yaxes(title_text="Frequency", row=1, col=1)
-    fig.update_yaxes(title_text="Frequency", row=1, col=2)
-    fig.update_yaxes(title_text="Equity", row=2, col=1)
-    fig.update_yaxes(title_text="Frequency", row=2, col=2)
-    
-    fig.show()
 
 
 # Example usage
@@ -454,4 +331,5 @@ if __name__ == "__main__":
     )
     
     # Plot results
+    from vectorflow.visualization.plotters import plot_path_mc_results
     plot_path_mc_results(mc_results)

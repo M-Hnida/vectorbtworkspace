@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional
 def _discover_strategies():
     """Auto-discover all strategies by scanning the strategies folder."""
     strategies = {}
-    strategies_dir = os.path.join(os.path.dirname(__file__), 'strategies')
+    strategies_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'strategies')
     
     if not os.path.exists(strategies_dir):
         return strategies
@@ -23,7 +23,7 @@ def _discover_strategies():
             
             try:
                 # Import the strategy module
-                module = importlib.import_module(f'strategies.{strategy_name}')
+                module = importlib.import_module(f'vectorflow.strategies.{strategy_name}')
                 
                 # Look for generic create_portfolio function
                 if hasattr(module, 'create_portfolio'):
@@ -64,7 +64,7 @@ def _extract_default_params(func):
 def _extract_optimization_grid(module, strategy_name):
     """Extract optimization grid from config file."""
     try:
-        from data_manager import load_strategy_config
+        from vectorflow.core.data_loader import load_strategy_config
         config = load_strategy_config(strategy_name)
         if config and 'optimization_grid' in config:
             return config['optimization_grid']
@@ -109,7 +109,7 @@ def get_optimization_grid(strategy_name: str) -> Dict[str, List]:
     """Get the optimization grid for a strategy from config file first."""
     # Always try to load fresh from config file first
     try:
-        from data_manager import load_strategy_config
+        from vectorflow.core.data_loader import load_strategy_config
         config = load_strategy_config(strategy_name)
         if config and 'optimization_grid' in config:
             return config['optimization_grid']
@@ -126,7 +126,7 @@ def get_default_parameters(strategy_name: str) -> Dict[str, Any]:
     """Get default parameters for a strategy from config file first."""
     # Always try to load fresh from config file first
     try:
-        from data_manager import load_strategy_config
+        from vectorflow.core.data_loader import load_strategy_config
         config = load_strategy_config(strategy_name)
         if config and 'parameters' in config:
             return config['parameters']

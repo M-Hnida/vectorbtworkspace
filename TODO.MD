@@ -99,47 +99,6 @@ sample_random_parameters()       # OK
 
 # Path Randomization
 run_path_randomization()         # Au lieu de run_path_randomization_mc()
-shuffle_returns()                # OK - privée
-bootstrap_trades()               # OK - privée
-
-# Plotting
-plot_parameter_sensitivity()     # Au lieu de plot_monte_carlo()
-plot_path_randomization()        # Au lieu de plot_path_mc_results()
-📝 PLAN DE MIGRATION (Étapes)
-Phase 1: Renommages Simples (Pas de breaking changes)
-bash
-# 1. Créer structure
-mkdir -p vectorflow/{core,optimization,validation,visualization}
-mkdir tests examples
-
-# 2. Déplacer fichiers (avec alias temporaires)
-mv monte_carlo_path.py validation/path_randomization.py
-mv walk_forward.py optimization/
-mv plotter.py visualization/plotters.py
-
-# 3. Créer __init__.py avec ré-exports pour compatibilité
-# vectorflow/__init__.py
-from .validation.path_randomization import run_path_randomization as run_path_randomization_mc  # Backward compat
-Phase 2: Refactoring optimizer.py
-python
-# optimization/param_monte_carlo.py
-def run_parameter_sensitivity(...):  # Nouveau nom clair
-    """Monte Carlo parameter sensitivity analysis."""
-    pass
-
-# optimization/grid_search.py  
-def run_grid_optimization(...):
-    """Grid search optimization."""
-    pass
-Phase 3: Tests
-bash
-mv test_*.py tests/
-mv debug_*.py examples/ ou scripts/
-💡 RECOMMANDATIONS ADDITIONNELLES
-Naming Conventions à suivre:
-✅ Modules: lowercase_with_underscores.py
-✅ Classes: CapWords (ex: ParameterSensitivityAnalyzer)
-✅ Fonctions: lowercase_with_underscores()
 ✅ Constantes: UPPER_WITH_UNDERSCORES
 ✅ Private: _leading_underscore
 Docstrings (Google Style):

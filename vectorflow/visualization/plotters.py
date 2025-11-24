@@ -500,3 +500,30 @@ def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
     colors = ['lightgray', 'red']
 
     fig.add_trace(go.Bar(x=categories, y=values, marker_color=colors, name='Perf Comparison'), row=2, col=2)
+
+
+def plot_comprehensive_analysis(portfolios: Dict[str, Any], strategy_name: str, mc_results=None, wf_results=None) -> None:
+    """Compatibility wrapper for old main.py calls."""
+    results = {}
+    
+    # Reconstruct the results dict expected by create_visualizations
+    # We treat the input portfolios as 'full_backtest' (optimized)
+    
+    # We need to convert flat {'sym_tf': pf} to {'sym': {'tf': pf}}
+    # Since we don't know the exact split, we'll use the key as symbol and '1h' as timeframe
+    # This is a hack but sufficient for visualization which iterates over them
+    structured_portfolios = {}
+    for key, pf in portfolios.items():
+        if key not in structured_portfolios:
+            structured_portfolios[key] = {}
+        structured_portfolios[key]['1h'] = pf
+            
+    results['full_backtest'] = structured_portfolios
+    
+    if mc_results:
+        results['monte_carlo'] = mc_results
+    if wf_results:
+        results['walkforward'] = wf_results
+        
+    figures = create_visualizations(results, strategy_name)
+    render_figures(figures)
