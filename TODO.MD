@@ -1,227 +1,154 @@
-✅ STRUCTURE PROPOSÉE (Convention Google)
-```
-vectorflow/
-├── vectorflow/                    # Package principal
-│   ├── __init__.py
-│   ├── core/                      # Logique métier core
-│   │   ├── __init__.py
-│   │   ├── portfolio_builder.py  # Anciennement: strategy_registry.py
-│   │   ├── data_loader.py         # Anciennement: data_manager.py
-│   │   └── constants.py
-│   │
-│   ├── strategies/                # Stratégies de trading
-│   │   ├── __init__.py
-│   │   ├── donchian.py
-│   │   ├── grid.py
-│   │   ├── risk_premia.py
-│   │   ├── statistical_arbitrage.py  # Anciennement: sol_btc_stat_arb.py
-│   │   ├── supertrend_grid.py
-│   │   └── _template.py           # Underscore = private/template
-│   │
-│   ├── optimization/              # Tout ce qui concerne l'optimisation
-│   │   ├── __init__.py
-│   │   ├── grid_search.py         # Extraction de optimizer.py
-│   │   ├── param_monte_carlo.py   # ⭐ RENOMMÉ (Monte Carlo pour params)
-│   │   └── walk_forward.py
-│   │
-│   ├── validation/                # ⭐ NOUVEAU - Analyses de robustesse
-│   │   ├── __init__.py
-│   │   ├── path_randomization.py  # ⭐ RENOMMÉ (ex: monte_carlo_path.py)
-│   │   └── bootstrap.py           # Futur: autres validations
-│   │
-│   ├── visualization/             # ⭐ RENOMMÉ
-│   │   ├── __init__.py
-│   │   ├── plotters.py            # Anciennement: plotter.py
-│   │   ├── dashboard.py           # Futur: Streamlit/Dash UI
-│   │   └── formatters.py          # Helpers pour formatting
-│   │
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── portfolio_metrics.py   # Anciennement: vbt_utils.py
-│   │   └── config_validator.py
-│   │
-│   └── cli.py                     # Anciennement: main.py
-│
-├── config/                        # Configuration files
-│   ├── strategies/
-│   │   ├── donchian.yaml
-│   │   └── ...
-│   └── settings.yaml              # Global settings
-│
-├── tests/                         # ⭐ NOUVEAU dossier
-│   ├── __init__.py
-│   ├── test_strategies.py         # Anciennement: test_all_strategies.py
-│   ├── test_path_randomization.py # Anciennement: test_path_mc_robust.py
-│   ├── test_optimization.py
-│   └── fixtures/                  # Test data
-│
-├── examples/                      # ⭐ NOUVEAU - Scripts démo
-│   ├── quickstart.py
-│   ├── custom_strategy_example.py
-│   └── batch_backtest.py
-│
-├── scripts/                       # Scripts utilitaires (pas exemples)
-│   ├── download_data.py
-│   └── benchmark_strategies.py
-│
-├── data/                          # Data files (ignored in git)
-├── .agent/                        # Workflow automation
-├── requirements.txt
-├── setup.py                       # ⭐ NOUVEAU - Pour pip install
-├── pyproject.toml                 # ⭐ NOUVEAU - Build config
-└── README.md
-```
-🔄 RENOMMAGES CLÉS (Priorité Haute)
-1. Clarifier les Monte Carlo
-python
-# AVANT
-optimizer.py::run_monte_carlo_analysis()         # Confus!
-monte_carlo_path.py::run_path_randomization_mc() # Confus!
+# VectorFlow TODO & Implementation Notes
 
-# APRÈS
-optimization/param_monte_carlo.py::run_parameter_sensitivity()
-validation/path_randomization.py::run_path_randomization()
-2. Fichiers principaux
-Ancien	Nouveau	Raison
-main.py	cli.py ou vectorflow/cli.py	Convention: main.py = entry point standalone
-strategy_registry.py	core/portfolio_builder.py	Plus descriptif
-data_manager.py	core/data_loader.py	Verbe → action claire
-plotter.py	visualization/plotters.py	Pluriel + dossier
-walk_forward.py	optimization/walk_forward.py	Même catégorie que optimisation
-vbt_utils.py	utils/portfolio_metrics.py	Descriptif, pas d'abréviation
-monte_carlo_path.py	validation/path_randomization.py	⭐ Clair et précis
-optimizer.py	Split en optimization/grid_search.py + optimization/param_monte_carlo.py	Séparation responsabilités
-3. Noms de fonctions (Cohérence)
-python
-# Optimizer / Parameter Sensitivity
-run_parameter_sensitivity()      # Au lieu de run_monte_carlo_analysis()
-sample_random_parameters()       # OK
+## ✅ COMPLETED
 
-# Path Randomization
-run_path_randomization()         # Au lieu de run_path_randomization_mc()
-✅ Constantes: UPPER_WITH_UNDERSCORES
-✅ Private: _leading_underscore
-Docstrings (Google Style):
-python
-def run_path_randomization(portfolio, n_simulations=1000, method="shuffle"):
-    """Tests strategy robustness by randomizing event sequence.
-    
-    Args:
-        portfolio: VectorBT Portfolio object to analyze
-        n_simulations: Number of randomized paths to generate
-        method: Randomization method ('shuffle', 'bootstrap', 'block')
-    
-    Returns:
-        dict: Statistics including p-values, percentiles, and distributions
-        
-    Raises:
-        ValueError: If portfolio has no trades or zero variance
-    """
+### Recent Completions (Nov 30, 2025)
+- [x] **StdDev Grid Strategy** - Created using standard deviation bands as support/resistance for grid trading
+- [x] **Path Monte Carlo Integration** - Added Path Randomization Monte Carlo to CLI with proper menu option
+- [x] **Data Loading Fix** - Fixed issue where all CSV files were loaded instead of just config-specified files
+- [x] **Code Cleanup** - Removed unused imports and variables in stddev_grid.py
+- [x] **Import Fixes** - Corrected walk_forward import path from optimization to validation
+
+### Previously Completed
+- [x] Project restructuring following Google conventions
+- [x] Portfolio builder auto-discovery system
+- [x] Grid search optimization
+- [x] Parameter Monte Carlo sensitivity analysis
+- [x] Path randomization validation
+- [x] Comprehensive visualization system
 
 ---
 
-## 🔬 **VALIDATION STATISTIQUE AUTOMATIQUE** (Éviter overfitting / data snooping)
+## 🔴 HIGH PRIORITY (Next Steps)
 
-### Problème
-- Actuellement: on regarde Sharpe/Return sans savoir si c'est statistiquement significatif
-- Risque: Stratégie profitable par hasard (ex: 5% de 100 tests passeront par pur luck)
+### 1. **Add Trade Direction Lines to Portfolio Plots** ⏳ IN PROGRESS
+**Status**: Attempted but file corruption occurred  
+**Goal**: Add visual lines connecting entry/exit points, colored by P&L (green=win, red=loss)  
+**Location**: `vectorflow/visualization/plotters.py` - `_plot_single_portfolio()` function  
+**Why**: Makes it much clearer when trades occur and their outcomes (like backtesting.py style)  
+**Estimated effort**: 30min  
 
-### Solution: Module `validation/statistical_tests.py`
+### 2. **Fix Multi-Timeframe Data Loading for Single-TF Strategies**
+**Status**: Identified issue  
+**Problem**: Strategies that only need primary_timeframe still load ALL timeframes  
+**Impact**: Significant performance hit (e.g., loading 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w unnecessarily)  
+**Solution**: Check if strategy `needs_multi_timeframe()`, if false, only load primary  
+**Location**: `cli.py` - `load_data()` method  
+**Estimated effort**: 1h  
 
-**Features à implémenter:**
-
-1. **Sharpe significance test** (Jobson & Korkie 1981)
-   - Test si Sharpe > 0 avec robustesse non-normalité
-   - Prend en compte skew et kurtosis
-   - Output: p-value + conclusion claire
-
-2. **Minimum trades check**
-   - Warning si < 30 trades (pas assez pour stats)
-   - Calcul automatique intervalle confiance
-
-3. **Autocorrelation test** (Ljung-Box)
-   - Détecte lookahead bias potentiel
-   - Returns ne devraient PAS être autocorrélés
-
-4. **Win rate sanity check**
-   - Flag si >95% (suspect, check lookahead)
-   - Flag si <20% (probablement cassé)
-
-5. **Multiple testing adjustment** (Harvey 2017)
-   - Si N variantes testées → Bonferroni correction
-   - Haircut Sharpe: `adjusted = observed - sqrt(N) * 0.5`
-
-**Intégration dans main.py:**
-- Appel automatique après chaque backtest
-- Print warnings clairs si fails
-- Option `--skip-validation` pour désactiver
-
-**Effort estimé:** 2-3h
-**Impact:** Critique - évite self-deception
+### 3. **Validate Path Monte Carlo is Using Correct Method**
+**Issue**: User noticed "Parameter Monte Carlo" ran when selecting "Path Randomization Monte Carlo"
+**Check needed**:
+  - Verify `run_path_randomization_mc()` is called (not `run_monte_carlo_analysis()`)
+  - Confirm plot shows equity paths, not parameter distributions  
+  - Test with stddev_grid strategy
+**Estimated effort**: 30min testing
 
 ---
 
-## ✅ **CHECKLIST DE VALIDATION INTERACTIVE**
+## 🟡 MEDIUM PRIORITY
 
-### Problème
-- Pas de guide systématique pour éviter erreurs communes
-- Utilisateurs oublient checks basiques (lookahead, survivorship bias, etc.)
-
-### Solution: Module `validation/checklist.py`
-
-**Catégories:**
-
-1. **Data Quality** (5 checks)
-   - No future data leakage
-   - No survivorship bias
-   - Timezone consistency
-   - No unexplained gaps
-   - Volume data realistic
-
-2. **Strategy Logic** (4 checks)
-   - Signals use only past data (t-1, not t)
-   - No intraday lookahead (open vs close)
-   - Execution delays modeled
-   - Rebalancing frequency realistic
-
-3. **Optimization** (4 checks)
-   - Walk-forward completed
-   - Holdout set tested (20% unseen)
-   - Performance consistent across periods
-   - Parameter count reasonable (data/params > 20)
-
-4. **Robustness** (4 checks)
-   - Path randomization MC passed (p < 0.05)
-   - Sharpe statistically significant
-   - Minimum 30 trades
-   - Beats buy-and-hold benchmark
-
-**Modes:**
-- Interactive: CLI avec input y/n
-- Auto: Appelle validation stats où possible
-- Report: Generate PDF checklist
-
-**Intégration:**
-- Appel optionnel: `python main.py --strategy X --validate`
-- Output: Score X/17 passed + detailed report
-
-**Effort estimé:** 3-4h  
-**Impact:** Fort - pédagogique + prévient erreurs
-
----
-
-## 📊 **BUY-AND-HOLD BENCHMARK (Simple print)**
-
-### Problème
-- Pas de comparaison automatique vs benchmark simple
-- Utilisateurs peuvent célébrer stratégie qui ne bat même pas B&H
-
-### Solution: 3 lignes dans `print_aggregated_portfolio_stats()`
-
+### 4. **Implement Buy-and-Hold Benchmark Comparison**
+**Why**: Users need automatic comparison to know if strategy beats simple B&H  
+**Implementation**: 3 lines in `print_summary()`:
 ```python
-# Après ligne 227 dans main.py
-# Add buy-and-hold comparison
-bh_portfolio = vbt.Portfolio.from_holding(close=primary_data['close'], init_cash=10000)
+bh_portfolio = vbt.Portfolio.from_holding(close=close, init_cash=10000)
 bh_return = bh_portfolio.total_return()
-print(f"📌 Buy & Hold Benchmark: {bh_return:.2f}%")
-print(f"   {'✅ Outperforms' if avg_return > bh_return else '⚠️ Underperforms'} B&H by {avg_return - bh_return:+.2f}%")
+print(f"� Buy & Hold: {bh_return:.2f}% | {'✅' if return > bh_return else '⚠️'} Strategy: {return - bh_return:+.2f}%")
+```
+**Estimated effort**: 15min
+
+### 5. **Statistical Validation Module** (`validation/statistical_tests.py`)
+**Goal**: Prevent overfitting and data snooping  
+**Features**:
+1. Sharpe significance test (Jobson & Korkie 1981)
+2. Minimum trades requirement (warn if < 30)
+3. Autocorrelation test (Ljung-Box) - detect lookahead bias
+4. Win rate sanity checks (flag if >95% or <20%)
+5. Multiple testing adjustment (Harvey 2017 haircut)
+
+**Integration**: Auto-run after backtest, print warnings  
+**Estimated effort**: 2-3h  
+**Impact**: Critical - prevents self-deception
+
+### 6. **Interactive Validation Checklist** (`validation/checklist.py`)
+**Categories** (17 checks total):
+- Data Quality (5): lookahead, survivorship bias, timezone, gaps, volume
+- Strategy Logic (4): past-only signals, execution delays, rebalancing frequency
+- Optimization (4): walk-forward, holdout set, consistency, parameter count
+- Robustness (4): path MC passed, Sharpe significant, min trades, beats B&H
+
+**Modes**: Interactive CLI, Auto-validate, PDF report  
+**Command**: `python main.py --strategy X --validate`  
+**Estimated effort**: 3-4h
+
+---
+
+## 🟢 LOW PRIORITY (Nice to Have)
+
+### 7. **Setup.py & PyPI Distribution**
+- Create proper `setup.py` for `pip install vectorflow`
+- Update `pyproject.toml` with build config
+- Publish to PyPI (optional)
+**Estimated effort**: 2h
+
+### 8. **Enhanced Documentation**
+- Expand README with quickstart guide
+- Add strategy development tutorial
+- Create examples/ directory with working demos
+**Estimated effort**: 3-4h
+
+### 9. **Dashboard UI** (`visualization/dashboard.py`)
+- Streamlit or Dash interface
+- Live portfolio monitoring
+- Interactive parameter tuning
+**Estimated effort**: 8-10h
+
+---
+
+## � CODE QUALITY IMPROVEMENTS
+
+### Linting (Ongoing)
+- Clean up remaining Ruff warnings
+- Fix any type hint inconsistencies
+- Remove dead code in plotters.py (if any remains)
+
+### Testing
+- Add unit tests for strategies
+- Test path Monte Carlo methods (shuffle, bootstrap, block)
+- Integration tests for CLI workflows
+
+---
+
+## 🎯 IMMEDIATE NEXT ACTION
+
+**Priority 1**: Fix trade direction lines in plots (complete the attempted work)  
+**Why**: Essential UX improvement that was interrupted  
+**Steps**:
+1. Restore `_plot_single_portfolio()` properly
+2. Add trade lines colored by P&L
+3. Test with stddev_grid strategy
+4. Verify browser performance with 1000+ trades limit
+
+**Priority 2**: Verify Path MC is working correctly (not showing param MC)  
+**Priority 3**: Add Buy & Hold benchmark (quick win)
+
+---
+
+## 📝 NOTES
+
+### Monte Carlo Naming Clarity
+✅ Successfully separated:
+- **Parameter MC** (`optimization/param_monte_carlo.py`) - Tests parameter sensitivity
+- **Path MC** (`validation/path_randomization.py`) - Tests sequence dependency
+
+### Data Loading Strategy
+✅ Now checks:
+1. `config.csv_path` (root level)
+2. `config.parameters.csv_path` (fallback)
+3. Auto-discover `data/*.csv` (last resort)
+
+### Multi-Timeframe Support
+- Template allows both single DataFrame and Dict[timeframe, DataFrame]
+- Auto-detection via `strategy_needs_multi_timeframe()`
+- Performance optimization needed for single-TF strategies

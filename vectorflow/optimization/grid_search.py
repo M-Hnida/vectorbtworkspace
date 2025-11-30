@@ -9,6 +9,7 @@ import vectorbt as vbt
 
 from vectorflow.core.constants import MAX_PARAM_COMBINATIONS
 
+
 def expand_parameter_grid(param_grid: Dict[str, Any]) -> Dict[str, List]:
     """Expand parameter grid from [start, end, step] format to list of values."""
     expanded = {}
@@ -52,7 +53,7 @@ def extract_portfolio_metrics(portfolio: "vbt.Portfolio") -> Dict[str, float]:
     try:
         stats = portfolio.stats()
         if stats is None:
-            return {"sharpe_ratio": 0.0, "total_return": 0.0, "max_drawdown": 0.0}
+            raise Exception("Portfolio stats are None")
 
         def safe_get(key: str, default: float = 0.0) -> float:
             try:
@@ -73,8 +74,8 @@ def extract_portfolio_metrics(portfolio: "vbt.Portfolio") -> Dict[str, float]:
             "total_return": safe_get("Total Return [%]"),
             "max_drawdown": safe_get("Max Drawdown [%]"),
         }
-    except Exception:
-        return {"sharpe_ratio": 0.0, "total_return": 0.0, "max_drawdown": 0.0}
+    except Exception as e:
+        raise Exception(f"Failed to extract portfolio metrics: {e}")
 
 
 def run_optimization(
