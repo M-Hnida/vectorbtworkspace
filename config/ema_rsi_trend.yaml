@@ -1,0 +1,43 @@
+# EMA-RSI Trend Following Strategy
+# ==================================
+# Entry: All conditions align (EMA trend + RSI + MACD)
+# Exit: EMA trend reversal
+
+parameters:
+  # EMA (Trend Direction)
+  ema_short_period: 34
+  ema_long_period: 200
+  
+  # RSI (Confirmation)
+  rsi_period: 14
+  rsi_smooth_period: 5
+  rsi_neutral: 50
+  
+  # MACD (Confluence)
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  require_macd_confirmation: true
+  
+  # Portfolio
+  initial_cash: 10000
+  fee: 0.001
+  freq: "1h"
+
+# Optimization Grid [start, end, step]
+optimization_grid:
+  ema_short_period: [20, 50, 10]
+  ema_long_period: [100, 250, 50]
+  rsi_period: [10, 20, 5]
+  rsi_neutral: [45, 55, 5]
+
+data_requirements:
+  required_columns: ["open", "high", "low", "close", "volume"]
+  min_data_points: 500
+
+metadata:
+  name: "EMA-RSI Trend Following"
+  description: "Trend-following: EMA34/200 for direction, RSI+MACD for confirmation"
+  version: "1.0"
+  instruments: ["BTC", "NASDAQ", "EURUSD"]
+  preferred_timeframes: ["1h", "4h"]

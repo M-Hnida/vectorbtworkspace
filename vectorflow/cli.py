@@ -106,10 +106,26 @@ class StrategyEngine:
                 "No CSV files specified in config and none found in data/ directory"
             )
 
+        # Calculate start_date from time_range
+        start_date = None
+        if time_range:
+            from datetime import datetime, timedelta
+
+            now = datetime.now()
+            if time_range == "3m":
+                start_date = now - timedelta(days=90)
+            elif time_range == "6m":
+                start_date = now - timedelta(days=180)
+            elif time_range == "1y":
+                start_date = now - timedelta(days=365)
+            elif time_range == "2y":
+                start_date = now - timedelta(days=730)
+            # "Full History" results in start_date=None
+
         # Just load the first CSV file (simplest approach)
         # Strategies can handle multi-asset if needed via config
         try:
-            self.primary_data = load_ohlc_csv(csv_paths[0])
+            self.primary_data = load_ohlc_csv(csv_paths[0], start_date=start_date)
             logger.info(f"✅ Loaded {len(self.primary_data)} bars from {csv_paths[0]}")
         except Exception as e:
             raise ValueError(f"Failed to load data from {csv_paths[0]}: {e}")
@@ -351,17 +367,16 @@ class CLI:
             print("No portfolio results to display.")
             return
 
-        print(f"\n   Return:      {pf.total_return() * 100:.2f}%")
-        print(f"   Sharpe:      {pf.sharpe_ratio():.3f}")
-        print(f"   Max DD:      {pf.max_drawdown() * 100:.2f}%")
+        print(f"Return: {pf.total_return() * 100:.2f}%")
+        print(f"Sharpe: {pf.sharpe_ratio():.3f}")
+        print(f"Max DD: {pf.max_drawdown() * 100:.2f}%")
 
         # Win rate and trades
         trades_count = len(pf.trades.records)
         if trades_count > 0:
-            winning_trades = len(pf.trades.records[pf.trades.records["pnl"] > 0])
-            win_rate = (winning_trades / trades_count) * 100
-            print(f"   Win Rate:    {win_rate:.1f}%")
-            print(f"   Trades:      {trades_count}")
+            win_rate = pf.stats.get("Win Rate")
+            print(f"Win Rate: {win_rate:.1f}%")
+            print(f"Trades: {trades_count}")
         else:
             raise ValueError("No trades found in portfolio.")
 

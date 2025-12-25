@@ -11,9 +11,7 @@ Usage:
 
 from typing import Optional, Union, Dict, Any
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
-import vectorbt as vbt
 
 
 def add_indicator(
@@ -23,132 +21,161 @@ def add_indicator(
     row: Optional[int] = None,
     name: Optional[str] = None,
     trace_kwargs: Optional[Dict[str, Any]] = None,
-    **plot_kwargs
+    **plot_kwargs,
 ) -> go.Figure:
-    """
-    Add an indicator to an existing portfolio plot figure.
-    This is just a wrapper for vbt.plot() to make life a bit easier. 
-    Args:
-        fig: Plotly figure (from portfolio.plot())
-        data: Indicator data - pd.Series, pd.DataFrame, or vbt indicator object
-        subplot: Boolean (add to first subplot) or 'new' (create new subplot)
-        row: Specific row number to add to (overrides subplot param)
-        name: Legend name for the indicator
-        trace_kwargs: Dict of kwargs for the trace styling
-        **plot_kwargs: Additional kwargs passed to vbt.plot()
-    
-    Returns:
-        Modified figure
-    
-    Examples:
-        >>> fig = portfolio.plot()
-        >>> fig = add_indicator(fig, rsi, subplot='new', name='RSI')
-        >>> fig = add_indicator(fig, sma200, row=1, name='SMA 200')
-    """
+    """Add an indicator to an existing portfolio plot figure."""
     if trace_kwargs is None:
         trace_kwargs = {}
-    
-    # Determine target row
-    if row is not None:
-        target_row = row
-    elif subplot:
-        # Create new subplot
-        current_rows = len(fig._grid_ref)
-        fig = _add_subplot_row(fig)
-        target_row = current_rows + 1
-    else:
-        target_row = 1
-    
-    # Add trace kwargs for subplot positioning
-    add_trace_kwargs = {'row': target_row, 'col': 1}
-    
-    # Set name if provided
+
+    target_row = row if row is not None else (len(fig._grid_ref) + 1 if subplot else 1)
+    add_trace_kwargs = {"row": target_row, "col": 1}
+
     if name and isinstance(data, pd.Series):
         data = data.rename(name)
-    
-    # Handle different data types - check pandas first since they also have .plot()
+
     if isinstance(data, (pd.Series, pd.DataFrame)):
-        # Standard pandas series/dataframe - use VectorBT accessor
         data.vbt.plot(
             add_trace_kwargs=add_trace_kwargs,
             trace_kwargs=trace_kwargs,
             fig=fig,
-            **plot_kwargs
+            **plot_kwargs,
         ).update_layout(width=None, height=None)
-    elif hasattr(data, 'plot') and hasattr(data, 'wrapper'):
-        # VectorBT indicator with .plot() method (e.g., BBands)
-        # VectorBT indicators have a 'wrapper' attribute
+    elif hasattr(data, "plot") and hasattr(data, "wrapper"):
         data.plot(
             add_trace_kwargs=add_trace_kwargs,
             fig=fig,
             trace_kwargs=trace_kwargs,
-            **plot_kwargs
+            **plot_kwargs,
         ).update_layout(width=None, height=None)
     else:
-        raise ValueError(f"Unsupported data type: {type(data)}. Expected pd.Series, pd.DataFrame, or VectorBT indicator.")
-    
+        raise ValueError(
+            f"Unsupported data type: {type(data)}. Expected pd.Series, pd.DataFrame, or VectorBT indicator."
+        )
+
     return fig
 
-def remove_date_gaps(
+
+def add_trade_signals(
+    portfolio: Any,
     fig: go.Figure,
-    data: Union[pd.DataFrame, pd.Series, pd.DatetimeIndex]
+    line_width: int = 2,
+    profit_color: str = "rgba(0, 255, 0, 0.6)",
+    loss_color: str = "rgba(255, 0, 0, 0.6)",
+    show_markers: bool = False,
+    start_date: Optional[Union[str, pd.Timestamp]] = None,
+    end_date: Optional[Union[str, pd.Timestamp]] = None,
+    **kwargs,
 ) -> go.Figure:
     """
-    Remove gaps from missing dates (weekends, holidays) in the plot.
-    
+    Add profit/loss colored connector lines between trade entry/exit points.
+
+    Green lines for profitable trades, red lines for losses.
+
     Args:
-        fig: Plotly figure
-        data: DataFrame, Series, or DatetimeIndex to detect gaps from
-    
-    Returns:
-        Modified figure with rangebreaks applied
-    
+        portfolio: VectorBT Portfolio object
+        fig: Existing Plotly figure
+        line_width: Width of connector lines (default: 2)
+        profit_color: Color for profitable trades (default: green)
+        loss_color: Color for losing trades (default: red)
+        show_markers: Show entry/exit markers (default: False)
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+
     Example:
         >>> fig = portfolio.plot()
-        >>> fig = add_indicator(fig, sma, name='SMA')
-        >>> fig = remove_date_gaps(fig, price_data)
-        >>> fig.show()
+        >>> fig = add_trade_signals(portfolio, fig)
     """
-    # Get datetime index
-    if isinstance(data, pd.DatetimeIndex):
-        dt_index = data
-    elif isinstance(data, (pd.DataFrame, pd.Series)):
-        dt_index = data.index
-    else:
-        raise ValueError("data must be DataFrame, Series, or DatetimeIndex")
-    
-    # Find gaps - dates that have NaN values or are missing
-    if isinstance(data, (pd.DataFrame, pd.Series)):
-        # Get close column or first column
-        if isinstance(data, pd.DataFrame):
-            close_col = 'close' if 'close' in data.columns else data.columns[0]
-            valid_dates = data[close_col].dropna().index.to_list()
-        else:
-            valid_dates = data.dropna().index.to_list()
-        
-        all_dates = dt_index.to_list()
-        dt_breaks = [d for d in all_dates if d not in valid_dates]
-    else:
-        dt_breaks = []
-    
-    # Apply rangebreaks
-    if dt_breaks:
-        fig.update_xaxes(rangebreaks=[dict(values=dt_breaks)])
-    
-    return fig
-
-
-def _add_subplot_row(fig: go.Figure) -> go.Figure:
-    """
-    Internal helper to add a new subplot row to an existing figure.
-    
-    Note: This is a simplified approach. For complex layouts, it's better
-    to define all subplots upfront in portfolio.plot().
-    """
-    # This is tricky with plotly - we'd need to recreate the figure
-    # For now, we'll raise an error suggesting to use row numbers instead
-    raise NotImplementedError(
-        "Creating new subplots dynamically is not supported. "
-        "Please specify the row number directly, or define all subplots "
-        "upfront using portfolio.plot(subplots=[...])"
+    wrapper, close_prices, trades = (
+        portfolio.wrapper,
+        portfolio.close,
+        portfolio.trades.records,
     )
+
+    if len(trades) == 0:
+        return fig
+
+    # Convert to DataFrame
+    trades_df = trades.to_pd() if hasattr(trades, "to_pd") else pd.DataFrame(trades)
+
+    # Filter by date
+    if start_date or end_date:
+        mask = pd.Series(True, index=trades_df.index)
+        if start_date:
+            mask &= wrapper.index[trades_df["entry_idx"]] >= pd.Timestamp(start_date)
+        if end_date:
+            mask &= wrapper.index[trades_df["exit_idx"]] <= pd.Timestamp(end_date)
+        trades_df = trades_df[mask]
+
+        if len(trades_df) == 0:
+            return fig
+
+    # Plot trades
+    entry_dates, entry_prices, exit_dates, exit_prices = [], [], [], []
+
+    for idx in range(len(trades_df)):
+        trade = trades_df.iloc[idx]
+        entry_idx, exit_idx = int(trade["entry_idx"]), int(trade["exit_idx"])
+
+        # Get prices (handle DataFrame or Series)
+        if isinstance(close_prices, pd.DataFrame):
+            col_idx = int(trade.get("col", 0))
+            entry_price, exit_price = (
+                close_prices.iloc[entry_idx, col_idx],
+                close_prices.iloc[exit_idx, col_idx],
+            )
+        else:
+            entry_price, exit_price = (
+                close_prices.iloc[entry_idx],
+                close_prices.iloc[exit_idx],
+            )
+
+        entry_dates.append(wrapper.index[entry_idx])
+        exit_dates.append(wrapper.index[exit_idx])
+        entry_prices.append(entry_price)
+        exit_prices.append(exit_price)
+
+        # Color by PnL
+        pnl = trade.get("pnl", exit_price - entry_price)
+        color = profit_color if pnl > 0 else loss_color
+
+        # Add line
+        fig.add_trace(
+            go.Scatter(
+                x=[wrapper.index[entry_idx], wrapper.index[exit_idx]],
+                y=[entry_price, exit_price],
+                mode="lines",
+                line=dict(color=color, width=line_width),
+                showlegend=False,
+                hoverinfo="skip",
+                **kwargs,
+            ),
+            row=1,
+            col=1,
+        )
+
+    # Optional markers
+    if show_markers:
+        fig.add_trace(
+            go.Scatter(
+                x=entry_dates,
+                y=entry_prices,
+                mode="markers",
+                marker=dict(color="green", size=8, symbol="triangle-up"),
+                name="Entry",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=exit_dates,
+                y=exit_prices,
+                mode="markers",
+                marker=dict(color="red", size=8, symbol="triangle-down"),
+                name="Exit",
+            ),
+            row=1,
+            col=1,
+        )
+
+    return fig

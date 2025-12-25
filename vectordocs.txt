@@ -53,6 +53,55 @@ This approach allows vectorbt to test thousands of parameter combinations in sec
 3. **Portfolio**: Simulates portfolio performance based on signals
 4. **Records**: Detailed information about trades, positions, and orders
 
+### ⚠️ Critical Gotchas
+
+#### Position Reversal with size_type="percent"
+
+**Problem**: When using `Portfolio.from_signals()` with `direction="both"`, the `size_type="percent"` does NOT support position reversal (going from long to short).
+
+```python
+# ❌ THIS WILL FAIL with: "SizeType.Percent does not support position reversal using signals"
+portfolio = vbt.Portfolio.from_signals(
+    close=close,
+    entries=long_entry,
+    short_entries=short_entry,
+    size=1.0,
+    size_type="percent",      # <-- Problem!
+    direction="both",
+)
+```
+
+**Solution**: Use default sizing (don't specify `size_type`) or use `size_type="amount"` / `"value"`:
+
+```python
+# ✅ CORRECT: Single portfolio with default sizing
+portfolio = vbt.Portfolio.from_signals(
+    close=close,
+    entries=long_entry,
+    exits=long_exit,
+    short_entries=short_entry,
+    short_exits=short_exit,
+    init_cash=10000,
+    fees=0.001,
+    direction="both",   # Works without size_type="percent"
+)
+
+# ✅ ALSO WORKS: Fixed dollar amount per trade
+portfolio = vbt.Portfolio.from_signals(
+    close=close,
+    entries=long_entry,
+    exits=long_exit,
+    short_entries=short_entry,
+    short_exits=short_exit,
+    size=5000,              # $5000 per trade
+    size_type="value",      # or "amount" for units
+    init_cash=10000,
+    direction="both",
+)
+```
+
+**Note**: With default sizing, VectorBT uses all available cash for each position.
+
 ## Sources de données
 
 ### Data Sources and Fetching
@@ -415,99 +464,7 @@ fig.update_layout(**export_kwargs)
 
 For complex multi-timeframe strategies, advanced visualization techniques help in understanding strategy behavior:
 
-```python
-// Creating comprehensive strategy visualization with multiple subplots
-def plot_strategy(slice_lower, slice_upper, df, rsi, bb_price, bb_rsi, pf, entries=None, exits=None, show_legend=True):
-    """
-    Creates a stacked indicator plot for multi-timeframe strategies.
-    
-    Parameters
-    ===========
-    slice_lower : str, start date of dataframe slice in yyyy.mm.dd format
-    slice_upper : str, start date of dataframe slice in yyyy.mm.dd format
-    df          : pd.DataFrame, containing the OHLCV data
-    rsi         : pd.Series, rsi indicator time series in same freq as df
-    bb_price    : vbt.indicators.factory.talib('BBANDS'), computed on df['close'] price
-    bb_rsi      : vbt.indicators.factory.talib('BBANDS') computed on RSI
-    pf          : vbt.portfolio.base.Portfolio, portfolio simulation object from VBT Pro
-    entries     : pd.Series, time series data of long entries
-    exits       : pd.Series, time series data of long exits
-    show_legend : bool, switch to show or completely hide the legend box on the plot
-    
-    Returns
-    fig         : plotly figure object
-    """
-    kwargs1 = {"title_text": "Multi-TimeFrame Strategy Visualization", 
-               "title_font_size": 18,
-               "height": 960,
-               "legend": dict(yanchor="top", y=0.99, xanchor="left", x=0.1)}
-    fig = vbt.make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
-    
-    // Filter Data according to date slice
-    df_slice = df[["Open", "High", "Low", "Close"]][slice_lower : slice_upper]
-    bb_price = bb_price[slice_lower : slice_upper]
-    rsi = rsi[slice_lower : slice_upper]
-    bb_rsi = bb_rsi[slice_lower : slice_upper]
-
-    // Plot OHLCV data
-    df_slice.vbt.ohlcv.plot(add_trace_kwargs=dict(row=1, col=1), fig=fig, **kwargs1)
-    
-    // Plot RSI indicator
-    rsi.rename("RSI").vbt.plot(add_trace_kwargs=dict(row=2, col=1), trace_kwargs=dict(connectgaps=True), fig=fig) 
-
-    // Plot Bollinger Bands
-    bb_line_style = dict(color="white", width=1, dash="dot")
-    bb_price.plot(add_trace_kwargs=dict(row=1, col=1), fig=fig, **kwargs1,
-                lowerband_trace_kwargs=dict(fill=None, name='BB_Price_Lower', connectgaps=True, line=bb_line_style), 
-                upperband_trace_kwargs=dict(fill=None, name='BB_Price_Upper', connectgaps=True, line=bb_line_style),
-                middleband_trace_kwargs=dict(fill=None, name='BB_Price_Middle', connectgaps=True) )
-
-    bb_rsi.plot(add_trace_kwargs=dict(row=2, col=1), limits=(25, 75), fig=fig,
-                lowerband_trace_kwargs=dict(fill=None, name='BB_RSI_Lower', connectgaps=True, line=bb_line_style), 
-                upperband_trace_kwargs=dict(fill=None, name='BB_RSI_Upper', connectgaps=True, line=bb_line_style),
-                middleband_trace_kwargs=dict(fill=None, name='BB_RSI_Middle', connectgaps=True, visible=False))
-    
-    // Plot trade signals and performance
-    pf[slice_lower:slice_upper].plot_trade_signals(add_trace_kwargs=dict(row=1, col=1), fig=fig,
-                                                   plot_close=False, plot_positions="lines")
-
-    // Plot trade P&L
-    pf.trades.direction_long[slice_lower : slice_upper].plot(
-        add_trace_kwargs=dict(row=1, col=1), fig=fig,
-        plot_close=False,
-        plot_markers=False
-    )
-    
-    // Add entry/exit signals to RSI subplot
-    if (entries is not None) & (exits is not None):
-        // Slice Entries and Exits
-        entries = entries[slice_lower : slice_upper]
-        exits = exits[slice_lower : slice_upper]
-        
-        // Add Entries and Exits on RSI subplot
-        entries.vbt.signals.plot_as_entries(rsi, fig=fig,
-                                            add_trace_kwargs=dict(row=2, col=1),
-                                            trace_kwargs=dict(name="Long Entry", 
-                                                              marker=dict(color="limegreen")))  
-
-        exits.vbt.signals.plot_as_exits(rsi, fig=fig, 
-                                        add_trace_kwargs=dict(row=2, col=1),
-                                        trace_kwargs=dict(name="Short Entry", 
-                                                          marker=dict(color="red")))
-    
-    fig.layout.showlegend = show_legend  
-    return fig
-
-// Usage example:
-slice_lower = '2019.11.01'
-slice_higher = '2019.12.31'
-
-fig = plot_strategy(slice_lower, slice_higher, h4_data.get(), h4_rsi, 
-                    h4_bbands, h4_bbands_rsi, pf,
-                    clean_h4_entries, clean_h4_exits,
-                    show_legend=True)
-fig.show()
-```
+#TODO: add exemples here
 
 ## Exemples de stratégies
 

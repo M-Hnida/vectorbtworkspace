@@ -129,15 +129,40 @@ def _bootstrap_trades(portfolio: vbt.Portfolio, n_simulations: int) -> Dict[str,
     """
     print("   Using bootstrap trades method...")
 
-    # Extract trades
-    trades_df = portfolio.trades.records_readable
+    # Calculate trade returns relative to portfolio equity at entry
+    # This prevents massive compounding errors when position size < 100%
+    pf_value = portfolio.value()
+    if isinstance(pf_value, pd.DataFrame):
+        pf_value = pf_value.iloc[:, 0]
 
-    if len(trades_df) == 0:
-        raise ValueError("Portfolio has no trades to bootstrap")
+    pf_value_arr = pf_value.values
+    entry_idxs = portfolio.trades.records["entry_idx"]
 
-    # Get per-trade returns as fractions
-    trade_returns = trades_df["PnL"].values / portfolio.init_cash
+    # Get equity at entry for each trade
+    try:
+        trade_entry_equities = pf_value_arr[entry_idxs]
+        # Replace zeros/negative with NaN to avoid errors
+        trade_entry_equities = np.where(
+            trade_entry_equities <= 0, np.nan, trade_entry_equities
+        )
+
+        trade_pnls = portfolio.trades.pnl.values
+
+        # Calculate % impact on portfolio
+        trade_returns = trade_pnls / trade_entry_equities
+
+        # Clean data
+        trade_returns = trade_returns[~np.isnan(trade_returns)]
+
+    except Exception as e:
+        print(f"   ⚠️  Error calculating equity-based returns: {e}")
+        print("   Falling back to simple PnL/InitCash")
+        trade_returns = portfolio.trades.pnl.values / portfolio.init_cash
+
     n_trades = len(trade_returns)
+
+    if n_trades == 0:
+        raise ValueError("Portfolio has no closed trades to bootstrap")
 
     simulated_returns = []
     simulated_sharpes = []

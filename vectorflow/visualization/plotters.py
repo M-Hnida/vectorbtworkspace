@@ -98,8 +98,18 @@ def render_figures(figures: Dict[str, go.Figure]) -> None:
 
 
 def _plot_single_portfolio(portfolio: Any, name: str, strategy_name: str) -> go.Figure:
-    """Generates a plot for a single portfolio."""
+    """Generates a plot for a single portfolio with trade connector lines."""
+    from vectorflow.visualization.indicators import add_trade_signals
+
     fig = portfolio.plot(template="plotly_dark")
+
+    # Add trade connector lines automatically
+    try:
+        fig = add_trade_signals(portfolio, fig)
+    except Exception as e:
+        # If adding trade signals fails, just continue with regular plot
+        print(f"⚠️  Could not add trade signals: {e}")
+
     fig.update_layout(title=f"{strategy_name} - {name}", height=None, width=None)
     return fig
 
@@ -547,7 +557,17 @@ def _plot_multi_asset_walkforward(wf_results: Dict[str, Any]) -> go.Figure:
 def _extract_portfolios_from_results(results: Dict[str, Any]) -> Dict[str, Any]:
     """Extracts portfolios into a flat dictionary with unique names."""
     portfolios = {}
-    keys_to_check = [("default_backtest", "_default"), ("full_backtest", "_optimized")]
+
+    # Determine if we have both default and optimized (real optimization occurred)
+    has_default = "default_backtest" in results
+    has_optimized = "full_backtest" in results
+    both_present = has_default and has_optimized
+
+    # Only add suffix if we have both to compare
+    keys_to_check = [
+        ("default_backtest", "_default" if both_present else ""),
+        ("full_backtest", "_optimized" if both_present else ""),
+    ]
 
     for key, suffix in keys_to_check:
         if key in results:
