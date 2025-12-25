@@ -91,7 +91,7 @@ def run_path_randomization_mc(
     statistics["p_value_sharpe"] = float(p_val_sharpe)
 
     # Print summary
-    print(f"\n📊 Monte Carlo Results:")
+    print("\n📊 Monte Carlo Results:")
     print(
         f"   Mean MC Return: {statistics['mean_mc_return']:.2f}% (±{statistics['std_mc_return']:.2f}%)"
     )
@@ -195,7 +195,6 @@ def _shuffle_returns(portfolio: vbt.Portfolio, n_simulations: int) -> Dict[str, 
         raise ValueError("Portfolio has no returns data")
 
     returns_array = returns.values
-    n_periods = len(returns_array)
 
     simulated_returns = []
     simulated_sharpes = []
@@ -217,7 +216,7 @@ def _shuffle_returns(portfolio: vbt.Portfolio, n_simulations: int) -> Dict[str, 
         if np.std(shuffled) > 0:
             sharpe = (np.mean(shuffled) / np.std(shuffled)) * np.sqrt(252)
         else:
-            sharpe = 0.0
+            raise ValueError("Portfolio has no returns data")
 
         # Max drawdown
         running_max = np.maximum.accumulate(equity)

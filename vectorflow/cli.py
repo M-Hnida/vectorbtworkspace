@@ -19,8 +19,7 @@ import logging
 import warnings
 from typing import Dict, Any, List
 from types import SimpleNamespace
-from datetime import datetime, timedelta
-import pandas as pd
+
 
 # Core Imports
 from vectorflow.core.config_manager import load_strategy_config
@@ -28,15 +27,7 @@ from vectorflow.core.data_loader import load_ohlc_csv
 from vectorflow.core.portfolio_builder import (
     create_portfolio,
     get_optimization_grid,
-    strategy_needs_multi_timeframe,
     get_available_strategies,
-)
-from vectorflow.core.constants import (
-    STAT_TOTAL_RETURN,
-    STAT_SHARPE_RATIO,
-    STAT_MAX_DRAWDOWN,
-    STAT_WIN_RATE,
-    STAT_TOTAL_TRADES,
 )
 
 # Analysis Modules
@@ -92,11 +83,10 @@ class StrategyEngine:
             f"Loading data for {self.strategy_name} ({time_range or 'Full History'})..."
         )
 
-        # Get CSV paths from config (check root level first, then parameters)
+        # Get CSV paths from config
         csv_paths = self.config.get("csv_path", [])
         if not csv_paths:
-            params = self.config.get("parameters", {})
-            csv_paths = params.get("csv_path", [])
+            csv_paths = self.config.get("parameters", {}).get("csv_path", [])
 
         if isinstance(csv_paths, str):
             csv_paths = [csv_paths]
@@ -116,136 +106,22 @@ class StrategyEngine:
                 "No CSV files specified in config and none found in data/ directory"
             )
 
-        # Calculate start_date from time_range
-        start_date = self._calculate_start_date(time_range, end_date)
-
-        # Load CSV files
-        # Structure: {symbol: {timeframe: DataFrame}}
-        self.data = {}
-        for path in csv_paths:
-            try:
-                df = load_ohlc_csv(path, start_date=start_date, end_date=end_date)
-
-                # Extract symbol and timeframe from filename
-                # Expected format: SYMBOL_TIMEFRAME.csv (e.g., BTCUSD_1h.csv)
-                filename = os.path.basename(path)
-                parts = filename.replace(".csv", "").split("_")
-
-                if len(parts) >= 2:
-                    symbol = parts[0]
-                    timeframe = parts[1].lower()
-                else:
-                    symbol = parts[0]
-                    timeframe = params.get("primary_timeframe", "1h")
-
-                if symbol not in self.data:
-                    self.data[symbol] = {}
-                self.data[symbol][timeframe] = df
-
-                logger.info(f"✅ Loaded {symbol} {timeframe}: {len(df)} bars")
-
-            except Exception as e:
-                logger.warning(f"⚠️  Failed to load {path}: {e}")
-
-        if not self.data:
-            raise ValueError("No data loaded. Check your CSV files and configuration.")
-
-        self._resolve_primary_data()
-
-    def _calculate_start_date(self, time_range: str, end_date: str):
-        """Calculate start date from time range string like '2y', '6m', '30d'."""
-        if not time_range:
-            return None
-
-        # Parse time range
-        time_range = time_range.lower().strip()
-        unit = time_range[-1]
-        value = int(time_range[:-1])
-
-        # Calculate end date
-        end = pd.to_datetime(end_date) if end_date else datetime.now()
-
-        # Calculate start date based on unit
-        if unit == "y":
-            start = end - timedelta(days=value * 365)
-        elif unit == "m":
-            start = end - timedelta(days=value * 30)
-        elif unit == "w":
-            start = end - timedelta(weeks=value)
-        elif unit == "d":
-            start = end - timedelta(days=value)
-        else:
-            return None
-
-        return start
-
-    def _resolve_primary_data(self):
-        """Determine the primary symbol and timeframe for optimization/analysis."""
-        params = self.config.get("parameters", {})
-
-        # Resolve Symbol
-        requested_symbol = str(params.get("primary_symbol", "")).lower()
-        sym_map = {k.lower(): k for k in self.data.keys()}
-        self.primary_symbol = sym_map.get(requested_symbol)
-
-        if not self.primary_symbol:
-            self.primary_symbol = next(iter(self.data.keys()))
-
-        # Resolve Timeframe
-        available_tfs = self.data[self.primary_symbol]
-        requested_tf = str(params.get("primary_timeframe", "")).lower()
-        tf_map = {k.lower(): k for k in available_tfs.keys()}
-        chosen_tf = tf_map.get(requested_tf)
-
-        if not chosen_tf:
-            chosen_tf = next(iter(available_tfs.keys()))
-
-        self.primary_timeframe = chosen_tf
-        self.primary_data = available_tfs[chosen_tf]
-
-        # Update config to reflect reality
-        self.config["parameters"]["primary_symbol"] = self.primary_symbol
-        self.config["parameters"]["primary_timeframe"] = self.primary_timeframe
-
-    def run_backtest(self, params: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        """Run a batch backtest across all loaded symbols and timeframes."""
-        results = {}
-        required_tfs = ["1h"]  # Could be dynamic based on strategy
-
-        for symbol, timeframes in self.data.items():
-            results[symbol] = {}
-
-            # Determine which timeframe(s) to test
-            if len(required_tfs) > 1:
-                # Multi-timeframe strategy: pass all data, but key by primary TF
-                tf_to_use = self.primary_timeframe
-                portfolio = self._create_portfolio_safe(
-                    symbol, tf_to_use, timeframes, params
-                )
-                if portfolio:
-                    results[symbol][tf_to_use] = portfolio
-            else:
-                # Single timeframe strategy: test on ALL available timeframes independently
-                for tf, data in timeframes.items():
-                    # For single TF, we pass just the dataframe
-                    portfolio = self._create_portfolio_safe(
-                        symbol, tf, timeframes, params
-                    )
-                    if portfolio:
-                        results[symbol][tf] = portfolio
-
-        return results
-
-    def _create_portfolio_safe(self, symbol, tf, timeframes, params):
-        """Helper to create portfolio with error handling."""
+        # Just load the first CSV file (simplest approach)
+        # Strategies can handle multi-asset if needed via config
         try:
-            if strategy_needs_multi_timeframe(self.strategy_name):
-                return create_portfolio(self.strategy_name, timeframes, params)
-            else:
-                return create_portfolio(self.strategy_name, timeframes[tf], params)
+            self.primary_data = load_ohlc_csv(csv_paths[0])
+            logger.info(f"✅ Loaded {len(self.primary_data)} bars from {csv_paths[0]}")
         except Exception as e:
-            logger.error(f"Backtest failed for {symbol} {tf}: {e}")
-            return None
+            raise ValueError(f"Failed to load data from {csv_paths[0]}: {e}")
+
+    def run_backtest(self, params: Dict[str, Any]):
+        """Run backtest with current parameters."""
+        try:
+            portfolio = create_portfolio(self.strategy_name, self.primary_data, params)
+            return portfolio
+        except Exception as e:
+            logger.error(f"Backtest failed: {e}")
+            raise
 
     def run_optimization(self) -> Dict[str, Any]:
         """Run parameter optimization."""
@@ -293,7 +169,8 @@ class StrategyEngine:
         try:
             # 1. Initial Backtest (Default Params)
             default_params = self.config.get("parameters", {})
-            results["results"]["default_portfolios"] = self.run_backtest(default_params)
+            default_portfolio = self.run_backtest(default_params)
+            results["results"]["default_portfolio"] = default_portfolio
 
             if mode == "fast":
                 self._generate_plots(results["results"], mode)
@@ -309,9 +186,8 @@ class StrategyEngine:
                 results["results"]["optimization"] = opt_results
 
             # 3. Optimized Backtest
-            results["results"]["optimized_portfolios"] = self.run_backtest(
-                optimized_params
-            )
+            optimized_portfolio = self.run_backtest(optimized_params)
+            results["results"]["optimized_portfolio"] = optimized_portfolio
 
             # 4. Advanced Analysis
             if mode in ["full", "param_monte_carlo"]:
@@ -320,21 +196,10 @@ class StrategyEngine:
                 )
 
             if mode == "path_monte_carlo":
-                # Use the primary portfolio for path randomization
-                # We need to extract the single portfolio object
-                pfs = results["results"]["optimized_portfolios"]
-                if (
-                    self.primary_symbol in pfs
-                    and self.primary_timeframe in pfs[self.primary_symbol]
-                ):
-                    primary_pf = pfs[self.primary_symbol][self.primary_timeframe]
-                    results["results"]["monte_carlo"] = self.run_path_monte_carlo(
-                        primary_pf
-                    )
-                else:
-                    logger.warning(
-                        "Could not find primary portfolio for Path Monte Carlo"
-                    )
+                # Use the optimized portfolio for path randomization
+                results["results"]["monte_carlo"] = self.run_path_monte_carlo(
+                    optimized_portfolio
+                )
 
             if mode in ["full", "walkforward"]:
                 results["results"]["walkforward"] = self.run_walk_forward(
@@ -356,31 +221,18 @@ class StrategyEngine:
         """Generate all relevant plots."""
         logger.info("📊 Generating Visualizations...")
 
-        # Flatten portfolios for the plotter
-        # The plotter expects { "Symbol_TF": portfolio, ... }
-        flattened_portfolios = {}
-        source_key = (
-            "optimized_portfolios"
-            if "optimized_portfolios" in results_dict
-            else "default_portfolios"
+        # Get portfolio to plot (prefer optimized over default)
+        portfolio = results_dict.get("optimized_portfolio") or results_dict.get(
+            "default_portfolio"
         )
 
-        for symbol, tfs in results_dict.get(source_key, {}).items():
-            for tf, pf in tfs.items():
-                key = (
-                    f"{symbol}_{tf}"
-                    if len(tfs) > 1 or len(results_dict.get(source_key, {})) > 1
-                    else symbol
-                )
-                flattened_portfolios[key] = pf
-
-        # Use the comprehensive plotter
-        plot_comprehensive_analysis(
-            flattened_portfolios,
-            self.strategy_name,
-            mc_results=results_dict.get("monte_carlo"),
-            wf_results=results_dict.get("walkforward"),
-        )
+        if portfolio:
+            plot_comprehensive_analysis(
+                {self.strategy_name: portfolio},
+                self.strategy_name,
+                mc_results=results_dict.get("monte_carlo"),
+                wf_results=results_dict.get("walkforward"),
+            )
 
 
 class CLI:
@@ -461,7 +313,20 @@ class CLI:
             results = engine.run_pipeline(mode=mode)
 
             if results["success"]:
-                CLI.print_summary(results["results"])
+                # For fast mode, just print stats and beta
+                if mode == "fast":
+                    pf = results["results"].get("optimized_portfolio") or results[
+                        "results"
+                    ].get("default_portfolio")
+                    if pf:
+                        print("\n" + "=" * 60)
+                        print("📊 PERFORMANCE SUMMARY")
+                        print("=" * 60)
+                        print(pf.stats())
+                        print(f"\nBeta: {pf.beta():.3f}")
+                        print("=" * 60)
+                else:
+                    CLI.print_summary(results["results"])
                 print("\n✅ Analysis Completed Successfully!")
             else:
                 print(f"\n❌ Analysis Failed: {results.get('error')}")
@@ -479,22 +344,26 @@ class CLI:
         print("📊 PERFORMANCE SUMMARY")
         print("=" * 60)
 
-        # Determine which portfolios to show (Optimized > Default)
-        pfs = results.get("optimized_portfolios") or results.get("default_portfolios")
+        # Get portfolio (prefer optimized over default)
+        pf = results.get("optimized_portfolio") or results.get("default_portfolio")
 
-        if not pfs:
+        if not pf:
             print("No portfolio results to display.")
             return
 
-        for symbol, tfs in pfs.items():
-            for tf, pf in tfs.items():
-                stats = pf.stats()
-                print(f"\n🔸 {symbol} [{tf}]")
-                print(f"   Return:      {stats[STAT_TOTAL_RETURN]:.2f}%")
-                print(f"   Sharpe:      {stats[STAT_SHARPE_RATIO]:.3f}")
-                print(f"   Max DD:      {stats[STAT_MAX_DRAWDOWN]:.2f}%")
-                print(f"   Win Rate:    {stats[STAT_WIN_RATE]:.1f}%")
-                print(f"   Trades:      {stats[STAT_TOTAL_TRADES]}")
+        print(f"\n   Return:      {pf.total_return() * 100:.2f}%")
+        print(f"   Sharpe:      {pf.sharpe_ratio():.3f}")
+        print(f"   Max DD:      {pf.max_drawdown() * 100:.2f}%")
+
+        # Win rate and trades
+        trades_count = len(pf.trades.records)
+        if trades_count > 0:
+            winning_trades = len(pf.trades.records[pf.trades.records["pnl"] > 0])
+            win_rate = (winning_trades / trades_count) * 100
+            print(f"   Win Rate:    {win_rate:.1f}%")
+            print(f"   Trades:      {trades_count}")
+        else:
+            raise ValueError("No trades found in portfolio.")
 
         print("\n" + "=" * 60)
 

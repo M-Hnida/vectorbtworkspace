@@ -4,14 +4,9 @@
 from typing import Dict, Any, List, Optional
 import time
 import numpy as np
-import pandas as pd
-import vectorbt as vbt
 from scipy import stats
 
-from vectorflow.core.constants import (
-    MONTE_CARLO_SIMULATIONS,
-    MONTE_CARLO_BATCH_SIZE,
-)
+
 from vectorflow.optimization.grid_search import (
     expand_parameter_grid,
     extract_portfolio_metrics,
@@ -21,6 +16,8 @@ from vectorflow.optimization.grid_search import (
 # Monte Carlo parameter sampling configuration
 MONTE_CARLO_THRESHOLD_SAMPLES = [0.0, 0.01, 0.02, 0.05, 0.1]
 MONTE_CARLO_FINE_GRID_POINTS = 10
+MONTE_CARLO_SIMULATIONS = 100
+MONTE_CARLO_BATCH_SIZE = 10
 
 
 def expand_grid_for_monte_carlo(param_grid: Dict) -> Dict[str, List]:

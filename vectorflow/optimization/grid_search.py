@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import vectorbt as vbt
 
-from vectorflow.core.constants import MAX_PARAM_COMBINATIONS
+MAX_PARAM_COMBINATIONS = 50
 
 
 def expand_parameter_grid(param_grid: Dict[str, Any]) -> Dict[str, List]:

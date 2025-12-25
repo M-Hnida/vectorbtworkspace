@@ -10,15 +10,21 @@ from typing import Dict
 
 import pandas as pd
 
-from vectorflow.core.constants import (
-    STAT_MAX_DRAWDOWN,
-    STAT_SHARPE_RATIO,
-    STAT_TOTAL_RETURN,
-    STAT_TOTAL_TRADES,
-)
 from vectorflow.core.data_loader import load_ohlc_csv
 from vectorflow.core.config_manager import load_strategy_config
 from vectorflow.core.portfolio_builder import create_portfolio, get_available_strategies
+
+warnings.filterwarnings("ignore")
+
+# =============================================================================
+# CONFIGURATION CONSTANTS
+# =============================================================================
+
+# Stats keys
+STAT_MAX_DRAWDOWN = "Max Drawdown [%]"
+STAT_SHARPE_RATIO = "Sharpe Ratio"
+STAT_TOTAL_RETURN = "Total Return [%]"
+STAT_TOTAL_TRADES = "Total Trades"
 
 warnings.filterwarnings("ignore")
 

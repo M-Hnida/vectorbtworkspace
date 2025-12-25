@@ -773,7 +773,6 @@ def _add_simulation_paths(
 
 def _add_mc_comparison(fig: go.Figure, statistics: dict) -> None:
     mean_random = statistics.get("mean_return", 0.0)
-    std_random = statistics.get("std_return", 0.0)
     actual_return = statistics.get("actual_return", 0.0)
 
     categories = ["Random Mean", "Strategy"]

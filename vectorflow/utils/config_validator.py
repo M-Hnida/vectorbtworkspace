@@ -32,13 +32,19 @@ def get_strategy_expected_params(strategy_name: str) -> Optional[Set[str]]:
     """
     try:
         from vectorflow.core.portfolio_builder import _STRATEGIES
+        import importlib
 
         if strategy_name not in _STRATEGIES:
             logger.debug(f"Strategy '{strategy_name}' not found in registry")
             return None
 
-        strategy_info = _STRATEGIES[strategy_name]
-        portfolio_func = strategy_info["portfolio_func"]
+        module_path = _STRATEGIES[strategy_name]
+        module = importlib.import_module(module_path)
+
+        if not hasattr(module, "create_portfolio"):
+            return None
+
+        portfolio_func = getattr(module, "create_portfolio")
 
         # Get source code
         source = inspect.getsource(portfolio_func)
