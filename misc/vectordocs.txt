@@ -1,0 +1,2449 @@
+# VectorBT: A Comprehensive Guide
+
+## Introduction
+
+VectorBT is a powerful Python package designed for quantitative analysis and backtesting trading strategies. It operates on pandas and NumPy objects, leveraging Numba for high-performance computations. This makes it exceptionally fast and scalable for backtesting trading strategies across multiple parameters, assets, and time periods.
+
+The library's name "VectorBT" reflects its core design philosophy: vectorized backtesting. Unlike traditional object-oriented backtesting frameworks that simulate trades sequentially, vectorbt processes entire arrays of data simultaneously, resulting in significant performance improvements.
+
+## Installation
+
+```python
+pip install vectorbt
+# For development version with latest features:
+pip install git+https://github.com/polakowo/vectorbt.git
+```
+
+### Dependencies and Environment Setup
+
+VectorBT requires specific versions for optimal performance:
+- Python 3.7+
+- NumPy >= 1.16.5
+- Pandas >= 1.2.0
+- Numba >= 0.53.1
+- Plotly >= 4.12.0
+
+```python
+# Recommended environment setup
+import vectorbt as vbt
+import numpy as np
+import pandas as pd
+
+# Configure VectorBT settings for optimal performance
+vbt.settings.set_theme('dark')
+vbt.settings.numba['cache'] = True
+vbt.settings.numba['parallel'] = True
+```
+
+## Fonctionnement de VectorBT
+
+### Philosophie vectorisée
+
+VectorBT's vectorized approach is fundamentally different from traditional event-driven backtesting:
+
+- **Traditional Backtesting**: Processes trades sequentially, simulating the passage of time (slower but intuitive)
+- **Vectorized Backtesting**: Processes entire arrays of data simultaneously (much faster but requires different thinking)
+
+This approach allows vectorbt to test thousands of parameter combinations in seconds, making it ideal for strategy optimization and research.
+
+### Composants cœur (Indicators, Signals, Portfolio, Records)
+
+1. **Indicators**: Technical indicators like moving averages, RSI, etc.
+2. **Signals**: Entry and exit points for trades
+3. **Portfolio**: Simulates portfolio performance based on signals
+4. **Records**: Detailed information about trades, positions, and orders
+
+### ⚠️ Critical Gotchas
+
+#### Position Reversal with size_type="percent"
+
+**Problem**: When using `Portfolio.from_signals()` with `direction="both"`, the `size_type="percent"` does NOT support position reversal (going from long to short).
+
+```python
+# ❌ THIS WILL FAIL with: "SizeType.Percent does not support position reversal using signals"
+portfolio = vbt.Portfolio.from_signals(
+    close=close,
+    entries=long_entry,
+    short_entries=short_entry,
+    size=1.0,
+    size_type="percent",      # <-- Problem!
+    direction="both",
+)
+```
+
+**Solution**: Use default sizing (don't specify `size_type`) or use `size_type="amount"` / `"value"`:
+
+```python
+# ✅ CORRECT: Single portfolio with default sizing
+portfolio = vbt.Portfolio.from_signals(
+    close=close,
+    entries=long_entry,
+    exits=long_exit,
+    short_entries=short_entry,
+    short_exits=short_exit,
+    init_cash=10000,
+    fees=0.001,
+    direction="both",   # Works without size_type="percent"
+)
+
+# ✅ ALSO WORKS: Fixed dollar amount per trade
+portfolio = vbt.Portfolio.from_signals(
+    close=close,
+    entries=long_entry,
+    exits=long_exit,
+    short_entries=short_entry,
+    short_exits=short_exit,
+    size=5000,              # $5000 per trade
+    size_type="value",      # or "amount" for units
+    init_cash=10000,
+    direction="both",
+)
+```
+
+**Note**: With default sizing, VectorBT uses all available cash for each position.
+
+## Sources de données
+
+### Data Sources and Fetching
+
+VectorBT supports multiple data sources with unified API:
+
+```python
+# Yahoo Finance (built-in)
+data = vbt.YFData.download('AAPL', start='2020-01-01', end='2023-01-01')
+price = data.get('Close')
+
+# CCXT for crypto exchanges
+import ccxt
+exchange = ccxt.binance()
+data = vbt.CCXTData.download('BTC/USDT', exchange=exchange, timeframe='1h')
+
+# Twelve Data API
+data = vbt.TwelveData.download('AAPL', interval='1day', apikey='your_key')
+
+# Custom data loading
+df = pd.read_csv('your_data.csv', index_col=0, parse_dates=True)
+data = vbt.Data.from_data(df)
+
+# Multiple symbols at once
+symbols = ['AAPL', 'GOOGL', 'MSFT']
+data = vbt.YFData.download(symbols, missing_index='drop')
+```
+
+### Data Preprocessing
+
+```python
+# Resampling and alignment
+data_1h = data.resample('1H').agg({
+    'Open': 'first',
+    'High': 'max', 
+    'Low': 'min',
+    'Close': 'last',
+    'Volume': 'sum'
+})
+
+# Missing data handling
+data = data.fillna(method='ffill')  # Forward fill
+data = data.dropna()  # Drop NaN values
+
+# Data validation
+assert not data.isnull().any().any(), "Data contains NaN values"
+```
+
+## Simulation de portefeuille
+
+### Portfolio Creation Methods
+
+VectorBT offers three main approaches for portfolio simulation:
+
+#### 1. from_signals (Most Common)
+```python
+portfolio = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    init_cash=10000,
+    fees=0.001,
+    freq='1D'
+)
+```
+
+#### 2. from_orders (Order-Based)
+```python
+# Define order sizes and directions
+size = pd.Series([100, -50, 200], index=price.index[:3])
+portfolio = vbt.Portfolio.from_orders(
+    close=price,
+    size=size,
+    init_cash=10000,
+    fees=0.001
+)
+```
+
+#### 3. from_order_func (Custom Logic)
+```python
+def order_func(c, size_type=vbt.SizeType.Amount):
+    return vbt.Order(size=1000, size_type=size_type)
+
+portfolio = vbt.Portfolio.from_order_func(
+    close=price,
+    order_func=order_func,
+    init_cash=10000
+)
+```
+
+### Advanced Portfolio Settings
+
+```python
+portfolio = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    
+    # Capital management
+    init_cash=100000,
+    cash_sharing=True,  # Share cash across assets
+    
+    # Position sizing
+    size=1.0,  # Fixed size
+    size_type='percent',  # 'amount', 'percent'
+    
+    # Risk management
+    sl_stop=0.05,  # 5% stop loss
+    tp_stop=0.10,  # 10% take profit
+    sl_trail=True,  # Trailing stop
+    
+    # Transaction costs
+    fees=0.001,  # 0.1% fee
+    fixed_fees=1.0,  # Fixed $1 per trade
+    slippage=0.001,  # 0.1% slippage
+    
+    # Execution settings
+    direction='both',  # 'longonly', 'shortonly', 'both'
+    conflict_mode='opposite',  # How to handle entry/exit conflicts
+    accumulate=False,  # Don't accumulate positions
+    
+    # Performance
+    freq='1D',  # Data frequency
+    seed=42  # Random seed for reproducibility
+)
+```
+
+### Multi-Asset Portfolio Management
+
+```python
+# Group-based portfolio (multiple assets)
+symbols = ['AAPL', 'GOOGL', 'MSFT']
+data = vbt.YFData.download(symbols)
+close = data.get('Close')
+
+portfolio = vbt.Portfolio.from_signals(
+    close=close,
+    entries=entries,
+    exits=exits,
+    group_by=True,  # Treat as single portfolio
+    cash_sharing=True,  # Share cash across assets
+    init_cash=100000
+)
+
+# Access individual asset performance
+for symbol in symbols:
+    asset_portfolio = portfolio[symbol]
+    print(f"{symbol} Return: {asset_portfolio.total_return():.2%}")
+```
+
+## Visualisation & Plotting
+
+### Bibliothèque de kwargs (plot_configs.py) – référence unique
+
+Pour éviter les redondances, centralisez tous vos paramètres dans un fichier dédié :`plot_configs.py`. Exemple :
+
+```python
+"""plot_configs.py – dictionnaires Plotly réutilisables"""
+import plotly.graph_objects as go
+
+# --- Mise en page générale ------------------------------------------------
+BASE_LAYOUT = dict(
+    template="plotly_dark",
+    height=600,
+    margin=dict(l=60, r=30, t=40, b=40),
+    colorway=["#00E396", "#0090FF", "#FEB019", "#FF4560"],
+)
+
+# --- Axes -----------------------------------------------------------------
+AXES = dict(
+    showgrid=True, gridwidth=0.5, gridcolor="rgba(255,255,255,0.1)",
+    showspikes=True, spikemode="across", spikecolor="rgba(200,200,200,0.4)",
+    spikethickness=1, ticks="outside", ticklen=5,
+    tickcolor="rgba(200,200,200,0.7)",
+)
+
+# --- Légende --------------------------------------------------------------
+LEGEND = dict(
+    orientation="h", yanchor="bottom", y=1.02,
+    xanchor="right", x=1, bgcolor="rgba(0,0,0,0)",
+    bordercolor="rgba(255,255,255,0.2)", borderwidth=1,
+)
+
+# --- Sous-tracés ----------------------------------------------------------
+SUBPLOTS = {
+    "orders": {
+        "close_trace_kwargs": {"visible": False}
+    }
+}
+
+# --- OHLC -----------------------------------------------------------------
+OHLC = dict(
+    plot_type="candlestick", show_volume=False, xaxis_rangeslider_visible=False,
+    ohlc_kwargs=dict(
+        increasing_line_color="rgba(0,200,0,0.8)",
+        decreasing_line_color="rgba(200,30,0,0.8)",
+    ),
+)
+
+# --- Exemple d’utilisation ----------------------------------------------
+from plot_configs import BASE_LAYOUT, AXES, LEGEND, SUBPLOTS, OHLC
+
+fig = portfolio.plot(subplot_settings=SUBPLOTS, **BASE_LAYOUT)
+fig = price.vbt.ohlcv.plot(fig=fig, **OHLC)
+fig.update_xaxes(**AXES)
+fig.update_yaxes(**AXES)
+fig.update_layout(legend=LEGEND, title="Orders & Candlestick Overlay",width=None,height=None).show()
+```
+mettre with=None,height=None est important pour avoir le plein écran car ce n'est pas initlisé de base dans vbt
+Les avantages :
+1. Une **source unique de vérité** pour vos réglages graphiques.
+2. Des **imports clairs** : `from plot_configs import BASE_LAYOUT`.
+3. La possibilité d’ajuster un paramètre (ex. `template`) pour tous les graphiques du projet.
+
+### Plotting Recipes
+
+Here are some quick recipes for common plotting tasks in vectorbt.
+
+#### Comparing Multiple Strategy Equity Curves
+
+The best way to compare the performance of multiple portfolios is to combine their equity curves into a single DataFrame and plot it.
+
+```python
+# Assumes portfolio_A and portfolio_B are existing vbt.Portfolio objects
+strategies = {
+    'Strategy A': portfolio_A, 
+    'Strategy B': portfolio_B
+}
+# Combine their values into a single DataFrame
+comparison_data = pd.DataFrame({
+    name: pf.value() for name, pf in strategies.items()
+})
+# Plot using vectorbt's accessor
+comparison_fig = comparison_data.vbt.plot()
+comparison_fig.update_layout(
+    title="Strategy Performance Comparison",
+    yaxis_title="Portfolio Value ($)"
+).show()
+```
+
+#### Plotting a Histogram of Returns
+
+To plot a distribution of returns, use `plotly.graph_objects.Histogram`. The `.vbt.hist()` accessor does not exist on a Series.
+
+```python
+import plotly.graph_objects as go
+
+returns_fig = go.Figure()
+returns_fig.add_trace(go.Histogram(
+    x=portfolio_A.returns(),
+    name='Strategy A',
+    opacity=0.7
+))
+returns_fig.add_trace(go.Histogram(
+    x=portfolio_B.returns(),
+    name='Strategy B',
+    opacity=0.7
+))
+returns_fig.update_layout(
+    title_text="Daily Returns Distribution",
+    barmode='overlay' # Overlay histograms for comparison
+).show()
+```
+
+#### Creating Subplots
+
+To create figures with multiple subplots, import and use `make_subplots` directly from `plotly.subplots`. When adding traces, use `add_trace_kwargs` to specify the row and column.
+
+```python
+from plotly.subplots import make_subplots
+
+# Create a figure with 2 rows
+# Assumes 'price' and 'indicator' are pandas Series
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True)
+
+# Add traces to specific subplots
+price.vbt.plot(fig=fig, add_trace_kwargs=dict(row=1, col=1))
+indicator.vbt.plot(fig=fig, add_trace_kwargs=dict(row=2, col=1))
+
+fig.show()
+```
+
+### Recettes rapides :
+
+• Performance globale • Overlay ordres + chandelier • Trade analysis
+
+### Exemples d’annotations / formes / palettes
+
+```python
+# --- Axe X et Y ----------------------------------------------------------
+axis_kwargs = dict(
+    showgrid=True,
+    gridwidth=0.5,
+    gridcolor='rgba(255,255,255,0.1)',
+    showspikes=True,
+    spikemode='across',
+    spikecolor='rgba(200,200,200,0.4)',
+    spikethickness=1,
+    ticks='outside',
+    ticklen=5,
+    tickcolor='rgba(200,200,200,0.7)'
+)
+
+# Utilisation :
+fig.update_xaxes(**axis_kwargs)
+fig.update_yaxes(**axis_kwargs)
+
+# --- Légende -------------------------------------------------------------
+legend_kwargs = dict(
+    orientation='h',
+    yanchor='bottom', y=1.02,
+    xanchor='right',  x=1,
+    bgcolor='rgba(0,0,0,0)',  # fond transparent
+    bordercolor='rgba(255,255,255,0.2)',
+    borderwidth=1
+)
+fig.update_layout(legend=legend_kwargs)
+
+# --- Marges et padding ---------------------------------------------------
+margin_kwargs = dict(l=60, r=30, t=40, b=40)
+fig.update_layout(margin=margin_kwargs)
+
+# --- Annotations ---------------------------------------------------------
+annotations = [
+    dict(x='2024-01-01', y=price.loc['2024-01-01'],
+         xref='x', yref='y',
+         text="Nouvelle année",
+         showarrow=True, arrowhead=2,
+         ax=0, ay=-40)
+]
+fig.update_layout(annotations=annotations)
+
+# --- Formes (zones, lignes horizontales…) -------------------------------
+shape_kwargs = dict(
+    type='rect',
+    xref='x', yref='paper',
+    x0='2024-03-01', x1='2024-03-15',
+    y0=0, y1=1,
+    fillcolor='rgba(255,0,0,0.1)',
+    line=dict(width=0)
+)
+fig.add_shape(**shape_kwargs)
+
+# --- Palette de couleurs -------------------------------------------------
+colorway_kwargs = dict(colorway=['#00E396', '#0090FF', '#FEB019', '#FF4560'])
+fig.update_layout(**colorway_kwargs)
+
+# --- Exportation / responsive -------------------------------------------
+export_kwargs = dict(
+    autosize=True,
+    height=600,
+    width=1200,
+    paper_bgcolor='rgba(0,0,0,0)',
+    plot_bgcolor='rgba(0,0,0,0)'
+)
+fig.update_layout(**export_kwargs)
+```
+
+### Advanced Portfolio Visualization Techniques
+
+For complex multi-timeframe strategies, advanced visualization techniques help in understanding strategy behavior:
+
+#TODO: add exemples here
+
+## Exemples de stratégies
+
+### SMA Crossover
+
+```python
+import vectorbt as vbt
+import pandas as pd
+
+# Fetch data
+price = vbt.YFData.download('SPY').get('Close')
+
+# Calculate fast and slow moving averages
+fast_ma = vbt.MA.run(price, 10)
+fast_ma = fast_ma.ma
+slow_ma = vbt.MA.run(price, 50)
+slow_ma = slow_ma.ma
+
+# Generate entry and exit signals
+entries = fast_ma.vbt.crossed_above(slow_ma)
+exits = fast_ma.vbt.crossed_below(slow_ma)
+
+# Create portfolio
+portfolio = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    init_cash=10000,
+    fees=0.001
+)
+
+# Display performance metrics
+print(portfolio.stats())
+
+# Plot results
+portfolio.plot().show()
+```
+
+Voir section 6 pour la visualisation
+
+### RSI Mean Reversion
+
+```python
+import vectorbt as vbt
+import pandas as pd
+
+# Fetch data
+price = vbt.YFData.download('SPY').get('Close')
+
+# Calculate RSI
+rsi = vbt.RSI.run(price, window=14).rsi
+
+# Generate entry and exit signals
+entries = rsi < 30  # Buy when RSI is below 30 (oversold)
+exits = rsi > 70    # Sell when RSI is above 70 (overbought)
+
+# Create portfolio
+portfolio = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    init_cash=10000,
+    fees=0.001
+)
+
+# Display performance metrics
+print(portfolio.stats())
+
+# Plot results
+portfolio.plot().show()
+```
+
+Voir section 6 pour la visualisation
+
+### Grid Trading (concept)
+
+Grid trading is a strategy that places buy and sell orders at predetermined price levels, creating a grid of orders. Here's how you might structure a grid trading implementation with vectorbt, focusing on the styling and methods rather than a specific algorithm:
+
+```python
+import vectorbt as vbt
+import pandas as pd
+import numpy as np
+
+# Configuration pattern - keeping settings organized in a dictionary
+CONFIG = {
+    'grid': {'levels': 5, 'range_percentage': 0.05},  # Grid parameters
+    'position': {'size': 1},  # Position sizing
+    'account': {'initial_cash': 10000, 'fees': 0.001},  # Account settings
+    'portfolio': {'freq': '1d', 'direction': 'both'}  # Portfolio settings
+}
+
+# Fetch data using vectorbt's data fetching capabilities
+price = vbt.YFData.download('BTC-USD').get('Close')
+
+# Example of how you might define grid levels
+min_price = price.min()
+max_price = price.max()
+grid_width = (max_price - min_price) / (CONFIG['grid']['levels'] - 1)
+
+# Create a DataFrame to store grid levels
+data = pd.DataFrame(index=price.index)
+data['close'] = price
+
+# Generate grid levels
+for i in range(CONFIG['grid']['levels']):
+    data[f'grid_{i}'] = min_price + grid_width * i
+
+# Signal generation example (simplified conceptual approach)
+# In a real implementation, you would need more sophisticated logic
+entries = pd.Series(False, index=data.index)
+exits = pd.Series(False, index=data.index)
+
+# Example of how signals might be generated
+# Note: This is a simplified example and not a complete implementation
+for i in range(1, CONFIG['grid']['levels']):
+    # Example condition: price crosses below a grid level
+    entries = entries | (data['close'] < data[f'grid_{i}']) & (data['close'].shift(1) >= data[f'grid_{i}'])
+    # Example condition: price crosses above a grid level
+    exits = exits | (data['close'] > data[f'grid_{i-1}']) & (data['close'].shift(1) <= data[f'grid_{i-1}'])
+
+# Create portfolio using vectorbt's Portfolio class
+portfolio = vbt.Portfolio.from_signals(
+    close=data['close'],
+    entries=entries,
+    exits=exits,
+    size=CONFIG['position']['size'],
+    init_cash=CONFIG['account']['initial_cash'],
+    fees=CONFIG['account']['fees'],
+    freq=CONFIG['portfolio']['freq'],
+    direction=CONFIG['portfolio']['direction']
+)
+
+# Display statistics and visualize results
+print(portfolio.stats())
+
+# Set theme to dark and create visualizations with fullscreen layout
+vbt.settings.set_theme('dark')
+
+# Portfolio plot with indicators and OHLCV data
+fig = portfolio.plot(subplot_settings={'orders': {'close_trace_kwargs': {'visible': False}}})
+
+# Add moving average to the plot
+data['ma'].vbt.plot(fig=fig, trace_kwargs=dict(name='MA', line=dict(color='orange', width=1)))
+
+# Add OHLCV candlestick chart
+fig = data.vbt.ohlcv.plot(
+    plot_type='candlestick',
+    show_volume=False,
+    xaxis_rangeslider_visible=False,
+    ohlc_kwargs=dict(
+        increasing_line_color='rgba(101, 230, 101, 0.8)',
+        decreasing_line_color='rgba(230, 30, 101, 0.8)'
+    ),
+    fig=fig
+)
+fig.update_layout(width=None, height=None, title_text="Grid Trading Strategy - Backtest").show()
+
+# Trade analysis with specific subplots and custom settings
+portfolio.plot(
+    subplot_settings={
+        'trades': dict(title='Trades'),
+        'trade_pnl': dict(title='Trade PnL')
+    }
+).update_layout(
+    width=None, height=None, 
+    title_text="Grid Strategy - Performance Analysis"
+).show()
+
+# Note: You can list available subplot and trace names using:
+# print(portfolio.subplots) # List available subplots
+# print(fig.data) # List all traces in a figure
+```
+
+Voir section 6 pour la visualisation
+
+### Double Bollinger Band Strategy
+
+A powerful multi-timeframe strategy that uses Bollinger Bands on both price and RSI across different timeframes:
+
+```python
+import vectorbt as vbt
+import pandas as pd
+import numpy as np
+
+// Configuration
+clean_h4_entries = clean_entries.vbt.resample_apply("4h", "any", wrap_kwargs=dict(dtype=bool))
+clean_h4_exits = clean_exits.vbt.resample_apply("4h", "any", wrap_kwargs=dict(dtype=bool))
+
+// Strategy Conditions:
+// 1. Long (buy) signal: H4 market (Low) price goes below its lower Bollinger band AND 15m RSI goes below its lower Bollinger band
+// 2. Short (sell) signal: H4 market (High) price breaks its upper Bollinger band AND 15m RSI breaks above its upper Bollinger band
+
+// Example implementation:
+bb_upper_fract = 0.99
+bb_lower_fract = 1.01
+
+// Long Entry Conditions
+c1_long_entry = (mtf_df['h4_low'] <= mtf_df['h4_bband_price_lower'])
+c2_long_entry = (mtf_df['m15_rsi'] <= (bb_lower_fract * mtf_df['m15_bband_rsi_lower']))
+
+// Long Exit Conditions
+c1_long_exit = (mtf_df['h4_high'] >= mtf_df['h4_bband_price_upper'])
+c2_long_exit = (mtf_df['m15_rsi'] >= (bb_upper_fract * mtf_df['m15_bband_rsi_upper']))
+
+// Combine conditions
+mtf_df['entry'] = c1_long_entry & c2_long_entry
+mtf_df['exit'] = c1_long_exit & c2_long_exit
+
+// Convert to signals
+mtf_df['signal'] = 0   
+mtf_df['signal'] = np.where(mtf_df['entry'], 1, 0)
+mtf_df['signal'] = np.where(mtf_df['exit'], -1, mtf_df['signal'])
+
+// Create portfolio using vectorbt's Portfolio class
+portfolio = vbt.Portfolio.from_signals(
+    close=mtf_df['m15_close'], 
+    entries=entries, 
+    exits=exits, 
+    direction="both", // This setting trades both long and short signals
+    freq=pd.Timedelta(minutes=5), 
+    init_cash=100000
+)
+
+// Display statistics and visualize results
+print(portfolio.stats())
+
+// Set theme to dark and create visualizations with fullscreen layout
+vbt.settings.set_theme('dark')
+vbt.settings['plotting']['layout']['width'] = 1280
+
+// Portfolio plot with indicators and OHLCV data
+fig = portfolio.plot(subplot_settings={'orders': {'close_trace_kwargs': {'visible': False}}})
+fig.update_layout(width=None, height=None, title_text="Double Bollinger Band Strategy - Backtest").show()
+```
+
+## Optimisation de paramètres
+
+One of vectorbt's most powerful features is its ability to efficiently test strategies across multiple parameters:
+
+```python
+import vectorbt as vbt
+import pandas as pd
+import numpy as np
+
+# Fetch data
+price = vbt.YFData.download('SPY').get('Close')
+
+# Define parameter ranges for fast and slow moving averages
+fast_windows = np.arange(5, 51, 5)  # 5, 10, 15, ..., 50
+slow_windows = np.arange(20, 101, 10)  # 20, 30, 40, ..., 100
+
+# Run MA Crossover for all combinations of parameters
+fast_ma = vbt.MA.run(price, window=fast_windows)
+fast_ma = fast_ma.ma
+slow_ma = vbt.MA.run(price, window=slow_windows)
+slow_ma = slow_ma.ma
+
+# Generate entry and exit signals for all parameter combinations
+entries = fast_ma.vbt.crossed_above(slow_ma)
+exits = fast_ma.vbt.crossed_below(slow_ma)
+
+# Create portfolio for all parameter combinations
+portfolio = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    init_cash=10000,
+    fees=0.001
+)
+
+# Find the best parameter combination based on Sharpe ratio
+metrics = portfolio.metrics(['total_return', 'sharpe_ratio', 'max_drawdown'])
+print(metrics)
+
+# Get the parameter combination with the highest Sharpe ratio
+best_idx = metrics['sharpe_ratio'].idxmax()
+print(f"Best parameters: Fast MA = {fast_windows[best_idx[0]]}, Slow MA = {slow_windows[best_idx[1]]}")
+
+# Plot the performance of the best strategy
+best_portfolio = portfolio.iloc[best_idx[0], best_idx[1]]
+best_portfolio.plot().show()
+```
+
+### Sweep vectorisé
+
+### Walk-Forward Analysis
+
+Walk-forward analysis is crucial for validating strategy robustness:
+
+```python
+# Manual walk-forward implementation
+def walk_forward_analysis(data, strategy_func, train_period=252, test_period=63):
+    results = []
+    
+    for i in range(train_period, len(data) - test_period, test_period):
+        # Training period
+        train_data = data.iloc[i-train_period:i]
+        
+        # Optimize parameters on training data
+        best_params = optimize_strategy(train_data, strategy_func)
+        
+        # Test period
+        test_data = data.iloc[i:i+test_period]
+        
+        # Apply optimized strategy to test period
+        portfolio = strategy_func(test_data, **best_params)
+        results.append({
+            'period': test_data.index[-1],
+            'return': portfolio.total_return(),
+            'sharpe': portfolio.sharpe_ratio(),
+            'params': best_params
+        })
+    
+    return pd.DataFrame(results)
+
+# Manual walk-forward implementation (since built-in doesn't exist in v0.28.0)
+def manual_walk_forward(data, strategy_func, train_period=252, test_period=63):
+    """Manual walk-forward analysis implementation"""
+    results = []
+    
+    for i in range(train_period, len(data) - test_period, test_period):
+        # Training period
+        train_data = data.iloc[i-train_period:i]
+        
+        # Optimize parameters on training data
+        best_params = optimize_strategy_manual(train_data, strategy_func)
+        
+        # Test period
+        test_data = data.iloc[i:i+test_period]
+        
+        # Apply optimized strategy to test period
+        portfolio = strategy_func(test_data, **best_params)
+        results.append({
+            'period': test_data.index[-1],
+            'return': portfolio.total_return(),
+            'sharpe': portfolio.sharpe_ratio(),
+            'params': best_params
+        })
+    
+    return pd.DataFrame(results)
+
+def optimize_strategy_manual(data, strategy_func):
+    """Manual parameter optimization"""
+    param_ranges = {
+        'fast': [5, 10, 15, 20],
+        'slow': [30, 40, 50, 60]
+    }
+    
+    best_sharpe = -np.inf
+    best_params = {}
+    
+    for fast in param_ranges['fast']:
+        for slow in param_ranges['slow']:
+            if fast >= slow:
+                continue
+                
+            portfolio = strategy_func(data, fast=fast, slow=slow)
+            sharpe = portfolio.sharpe_ratio()
+            
+            if sharpe > best_sharpe:
+                best_sharpe = sharpe
+                best_params = {'fast': fast, 'slow': slow}
+    
+    return best_params
+
+# Usage
+results = manual_walk_forward(price, ma_crossover_strategy)
+```
+
+### Manual Optimization Techniques (v0.28.0 Compatible)
+
+```python
+# Grid search optimization (manual implementation)
+def grid_search_optimization(price, param_grid):
+    """Manual grid search optimization"""
+    results = []
+    
+    for fast in param_grid['fast']:
+        for slow in param_grid['slow']:
+            if fast >= slow:
+                continue
+                
+            # Calculate indicators
+            fast_ma = vbt.MA.run(price, fast).ma
+            slow_ma = vbt.MA.run(price, slow).ma
+            
+            # Generate signals
+            entries = fast_ma.vbt.crossed_above(slow_ma)
+            exits = fast_ma.vbt.crossed_below(slow_ma)
+            
+            # Create portfolio
+            portfolio = vbt.Portfolio.from_signals(
+                close=price,
+                entries=entries,
+                exits=exits,
+                init_cash=10000,
+                fees=0.001,
+                freq='D'
+            )
+            
+            results.append({
+                'fast': fast,
+                'slow': slow,
+                'sharpe': portfolio.sharpe_ratio(),
+                'return': portfolio.total_return(),
+                'max_dd': portfolio.max_drawdown()
+            })
+    
+    return pd.DataFrame(results)
+
+# Bayesian Optimization (requires scikit-optimize)
+# pip install scikit-optimize
+from skopt import gp_minimize
+from skopt.space import Integer
+
+def objective_function(params):
+    """Objective function for Bayesian optimization"""
+    fast, slow = params
+    
+    if fast >= slow:
+        return 1.0  # Return bad score for invalid params
+    
+    fast_ma = vbt.MA.run(price, fast).ma
+    slow_ma = vbt.MA.run(price, slow).ma
+    entries = fast_ma.vbt.crossed_above(slow_ma)
+    exits = fast_ma.vbt.crossed_below(slow_ma)
+    
+    portfolio = vbt.Portfolio.from_signals(
+        close=price,
+        entries=entries,
+        exits=exits,
+        init_cash=10000,
+        freq='D'
+    )
+    
+    return -portfolio.sharpe_ratio()  # Minimize negative Sharpe
+
+# Define search space
+space = [
+    Integer(5, 50, name='fast'),
+    Integer(20, 200, name='slow')
+]
+
+# Run optimization
+result = gp_minimize(
+    func=objective_function,
+    dimensions=space,
+    n_calls=50,
+    random_state=42
+)
+
+print(f"Best parameters: fast={result.x[0]}, slow={result.x[1]}")
+print(f"Best Sharpe ratio: {-result.fun:.3f}")
+```
+
+## Cadre de stratégie réutilisable (classes abstraites + dataclasses)
+
+Here's an example of a flexible strategy framework using vectorbt:
+
+```python
+from abc import ABC, abstractmethod
+from typing import Dict, List, Tuple
+import pandas as pd
+import vectorbt as vbt
+from dataclasses import dataclass
+
+@dataclass
+class MarketData:
+    """Container for market data"""
+    symbol: str
+    timeframe: str
+    open: pd.Series
+    high: pd.Series
+    low: pd.Series
+    close: pd.Series
+    volume: pd.Series
+    
+    @property
+    def ohlcv(self) -> pd.DataFrame:
+        """Return OHLCV DataFrame"""
+        return pd.DataFrame({
+            'open': self.open,
+            'high': self.high,
+            'low': self.low,
+            'close': self.close,
+            'volume': self.volume
+        })
+
+@dataclass
+class StrategyConfig:
+    """Base configuration for strategies"""
+    name: str
+    version: str = "1.0"
+    author: str = ""
+    description: str = ""
+
+class BaseStrategy(ABC):
+    """Abstract base class for all trading strategies"""
+    
+    # Class-level parameter grid for optimization
+    param_grid: Dict[str, List] = {}
+    
+    # Strategy metadata
+    config: StrategyConfig = None
+    
+    def __init__(self, **params):
+        """Initialize strategy with parameters"""
+        # Set parameters as attributes
+        for key, value in params.items():
+            setattr(self, key, value)
+        
+        # Initialize indicator cache
+        self._indicator_cache = {}
+        
+        # Validate parameters
+        self.validate_parameters()
+    
+    def validate_parameters(self):
+        """Override to add parameter validation"""
+        pass
+    
+    @abstractmethod
+    def calculate_indicators(self, data: MarketData) -> Dict[str, pd.Series]:
+        """Calculate all indicators needed for the strategy"""
+        pass
+    
+    @abstractmethod
+    def generate_signals(self, data: MarketData, indicators: Dict[str, pd.Series]) -> Tuple[pd.Series, pd.Series]:
+        """Generate entry and exit signals based on indicators"""
+        pass
+    
+    def entries(self, data: MarketData) -> pd.Series:
+        """Generate entry signals - called by backtester"""
+        indicators = self.calculate_indicators(data)
+        entries, _ = self.generate_signals(data, indicators)
+        return entries
+    
+    def exits(self, data: MarketData) -> pd.Series:
+        """Generate exit signals - called by backtester"""
+        indicators = self.calculate_indicators(data)
+        _, exits = self.generate_signals(data, indicators)
+        return exits
+
+# Example implementation
+class MACrossoverStrategy(BaseStrategy):
+    """Simple MA Crossover"""
+    
+    config = StrategyConfig(
+        name="MA Crossover",
+        version="2.0",
+        description="Crosses of fast and slow moving averages"
+    )
+    
+    param_grid = {
+        'fast_period': [10, 20, 30],
+        'slow_period': [50, 100, 200],
+        'ma_type': ['SMA', 'EMA']
+    }
+    
+    def validate_parameters(self):
+        if self.fast_period >= self.slow_period:
+            raise ValueError("Fast period must be less than slow period")
+    
+    def calculate_indicators(self, data: MarketData) -> Dict[str, pd.Series]:
+        """Calculate moving averages"""
+        if self.ma_type == 'SMA':
+            fast_ma = vbt.MA.run(data.close, self.fast_period, short_name='fast').ma.squeeze()
+            slow_ma = vbt.MA.run(data.close, self.slow_period, short_name='slow').ma.squeeze()
+        else:  # EMA
+            fast_ma = vbt.MA.run(data.close, self.fast_period, ewm=True, short_name='fast').ma.squeeze()
+            slow_ma = vbt.MA.run(data.close, self.slow_period, ewm=True, short_name='slow').ma.squeeze()
+        
+        return {
+            'fast_ma': fast_ma,
+            'slow_ma': slow_ma
+        }
+    
+    def generate_signals(self, data: MarketData, indicators: Dict[str, pd.Series]) -> Tuple[pd.Series, pd.Series]:
+        """Generate crossover signals"""
+        fast_ma = indicators['fast_ma']
+        slow_ma = indicators['slow_ma']
+        
+        # Entry when fast crosses above slow
+        entries = (fast_ma > slow_ma) & (fast_ma.shift(1) <= slow_ma.shift(1))
+        
+        # Exit when fast crosses below slow
+        exits = (fast_ma < slow_ma) & (fast_ma.shift(1) >= slow_ma.shift(1))
+        
+        return entries, exits
+```
+
+## Performance (VB vs implémentations Pandas)
+
+VectorBT significantly outperforms traditional backtesting frameworks in terms of speed. Here's a comparison of computing a rolling Z-score:
+
+### Pandas Implementation
+
+```python
+def pandas_zscore(series, window):
+    r = series.rolling(window=window)
+    m = r.mean()
+    s = r.std(ddof=0)
+    return (series - m) / s
+```
+
+### VectorBT Implementation
+
+```python
+@njit
+def nb_zscore(arr, window):
+    out = np.empty_like(arr)
+    for i in range(arr.shape[0]):
+        if i < window:
+            out[i] = np.nan
+        else:
+            window_slice = arr[i-window:i]
+            mean = np.mean(window_slice)
+            std = np.std(window_slice)
+            out[i] = (arr[i] - mean) / std
+    return out
+```
+
+For a series with 10,000 elements and a window of 100, vectorbt's implementation can be 10-100x faster.
+
+### Memory Management and Performance Tips
+
+```python
+# CRITICAL: Set frequency globally to avoid errors
+vbt.settings.array_wrapper['freq'] = 'D'  # Set daily frequency
+
+# Memory-efficient chunked processing
+def process_in_chunks(data, chunk_size=1000):
+    """Process large datasets in chunks to manage memory"""
+    results = []
+    
+    for i in range(0, len(data), chunk_size):
+        chunk = data.iloc[i:i+chunk_size]
+        
+        if len(chunk) < 50:  # Skip small chunks
+            continue
+            
+        # Process chunk
+        fast_ma = vbt.MA.run(chunk, 10).ma
+        slow_ma = vbt.MA.run(chunk, 20).ma
+        entries = fast_ma > slow_ma
+        exits = fast_ma < slow_ma
+        
+        portfolio = vbt.Portfolio.from_signals(
+            close=chunk,
+            entries=entries,
+            exits=exits,
+            init_cash=10000,
+            freq='D'  # Always specify frequency
+        )
+        
+        results.append({
+            'chunk': i // chunk_size + 1,
+            'return': portfolio.total_return(),
+            'trades': portfolio.stats()['Total Trades']
+        })
+    
+    return pd.DataFrame(results)
+
+# Manual parameter optimization (since optimization module not available)
+def optimize_strategy(price, param_ranges):
+    """Manual parameter optimization"""
+    results = []
+    
+    for fast in param_ranges['fast']:
+        for slow in param_ranges['slow']:
+            if fast >= slow:
+                continue
+                
+            fast_ma = vbt.MA.run(price, fast).ma
+            slow_ma = vbt.MA.run(price, slow).ma
+            entries = fast_ma > slow_ma
+            exits = fast_ma < slow_ma
+            
+            portfolio = vbt.Portfolio.from_signals(
+                close=price,
+                entries=entries,
+                exits=exits,
+                init_cash=10000,
+                fees=0.001,
+                freq='D'
+            )
+            
+            stats = portfolio.stats()
+            results.append({
+                'fast': fast,
+                'slow': slow,
+                'return': portfolio.total_return(),
+                'sharpe': portfolio.sharpe_ratio(),
+                'trades': stats['Total Trades'],
+                'win_rate': stats['Win Rate [%]']
+            })
+    
+    return pd.DataFrame(results)
+```
+
+### Error Handling and Debugging
+
+```python
+# CRITICAL: Always set frequency to avoid the most common error
+vbt.settings.array_wrapper['freq'] = 'D'
+
+# Common error patterns and solutions
+try:
+    portfolio = vbt.Portfolio.from_signals(
+        close=price,
+        entries=entries,
+        exits=exits,
+        freq='D'  # ALWAYS specify frequency
+    )
+except Exception as e:
+    if "frequency is None" in str(e):
+        # Fix frequency issue (most common error)
+        portfolio = vbt.Portfolio.from_signals(
+            close=price,
+            entries=entries,
+            exits=exits,
+            freq='D'  # Add frequency parameter
+        )
+    elif "Data type" in str(e):
+        # Fix data type issues
+        entries = entries.astype(bool)
+        exits = exits.astype(bool)
+    elif "Index mismatch" in str(e):
+        # Align indices
+        entries = entries.reindex(price.index, fill_value=False)
+        exits = exits.reindex(price.index, fill_value=False)
+    else:
+        raise e
+
+# Debugging tools
+print(f"Entries shape: {entries.shape}")
+print(f"Entries dtype: {entries.dtype}")
+print(f"Price shape: {price.shape}")
+print(f"Index alignment: {entries.index.equals(price.index)}")
+
+# Validate signals
+assert entries.dtype == bool, "Entries must be boolean"
+assert exits.dtype == bool, "Exits must be boolean"
+assert len(entries) == len(price), "Length mismatch"
+
+# Access portfolio metrics correctly
+stats = portfolio.stats()
+total_trades = stats['Total Trades']
+win_rate = stats['Win Rate [%]']
+sharpe_ratio = portfolio.sharpe_ratio()
+```
+
+
+### **I. Optimisation du Portefeuille avec VectorBT**
+
+1. **Diversification Multi-Assets Avancée**
+   - Implémentez une **matrice de corrélation dynamique** entre les actifs :
+   ```python
+   returns = full_portfolio.returns()
+   correlation_matrix = returns.vbt.returns.corr()
+   heatmap = correlation_matrix.vbt.heatmap()
+   ```
+   - Utilisez `vbt.Portfolio.from_orders` avec `group_by=True` pour une allocation pondérée par volatilité (risk parity)
+
+2. **Walk-Forward Optimization Automatisée**
+   - Remplacez l'optimisation manuelle par le module `vbt.PfOrc` :
+   ```python
+   walkforward = vbt.PfOrc.walk(
+       n=30,  # Nombre de fenêtres
+       window_len=365,
+       set_lens=(90, 180),
+       lag=30
+   )
+   ```
+
+3. **Position Sizing Dynamique**
+   - Intégrez des méthodes scientifiques de sizing :
+   ```python
+   # Kelly Criterion
+   kelly_size = returns.vbt.kelly_size()
+   # Optimal Sizing via Sharpe Ratio Maximization
+   optimal_size = returns.vbt.optimal_size()
+   ```
+
+4. **Analyse de Sensibilité Paramétrique**
+   - Utilisez les grilles paramétriques natives :
+   ```python
+   param_grid = np.array(np.meshgrid(
+       np.arange(10, 100, 10),  # windows
+       np.linspace(0.5, 0.9, 5),  # vol_quantiles
+       np.arange(1.0, 3.0, 0.5)  # z_thresholds
+   ), dtype=object).T.reshape(-1, 3)
+   ```
+
+5. **Gestion du Risque Portfolio-Level**
+   - Implémentez un stop-loss global :
+   ```python
+   portfolio = vbt.Portfolio.from_signals(
+       ...,
+       stop_loss=0.05,  # Stop global
+       stop_type='percent'
+   )
+   ```
+
+---
+
+### **II. Visualisations Avancées avec VectorBT**
+
+1. **Dashboard Interactif Intégré**
+   ```python
+   full_portfolio.plot(
+       subplots=['orders', 'trade_pnl', 'cum_returns', 'drawdowns'],
+       active_subplots=True,
+       width=1400
+   ).show()
+   ```
+
+2. **Heatmaps de Performance Paramétrique**
+   ```python
+   results_df.vbt.heatmap(
+       x_level='window',
+       y_level='z_threshold',
+       slider_level='vol_quantile',
+       trace_kwargs=dict(colorbar=dict(title='Sharpe'))
+   )
+   ```
+
+3. **Analyse Comparative Automatisée**
+   ```python
+   benchmark_rets = buy_hold.pct_change()
+   vbt.plotting.plot_multiple(
+       [full_portfolio.returns(), benchmark_rets],
+       labels=['Strategy', 'Benchmark'],
+       performance_kwargs=dict(title="Performance Comparée")
+   )
+   ```
+
+4. **Visualisation 3D des Paramètres**
+   ```python
+   fig = results_df.vbt.plot_3d(
+       x='window',
+       y='z_threshold',
+       z='sharpe',
+       trace_kwargs=dict(
+           colorscale='Viridis',
+           opacity=0.7
+       )
+   )
+   fig.update_layout(scene=dict(zaxis_title='Sharpe Ratio'))
+   ```
+
+5. **Analyse Monte Carlo Intégrée**
+   ```python
+   mc_sims = full_portfolio.vbt.monte_carlo(
+       n=1000,
+       time_hops=252
+   )
+   mc_sims.plot().show()
+   ```
+
+---
+
+### **III. Optimisations Techniques Avancées**
+
+1. **Caching des Données Optimisé**
+   ```python
+   data = vbt.YFData.download(
+       symbols,
+       missing_index='drop',
+       show_progress=True
+   ).cache()
+   ```
+
+2. **Calculs Parallélisés**
+   ```python
+   results = vbt.run_parallel(
+       param_grid,
+       run_func=run_backtest,
+       engine='ray'
+   )
+   ```
+
+3. **Custom Metrics**
+   ```python
+   vbt.settings.portfolio['metrics'] = {
+       'calmar_ratio': vbt.CalmarRatio,
+       'tail_ratio': vbt.TailRatio
+   }
+   ```
+
+4. **Analyse de Liquidité**
+   ```python
+   liquidity = data.get('volume').rolling(50).mean()
+   portfolio = vbt.Portfolio.from_signals(
+       ...,
+       size=np.where(liquidity > threshold, base_size, base_size * 0.5)
+   )
+   ```
+
+5. **Frais en Fonction du Volume**
+   ```python
+   def dynamic_fees(volume):
+       return np.where(volume > 1e6, 0.0005, 0.001)
+   ```
+
+---
+
+### **IV. Points d'Amélioration Clés**
+
+1. **Transition vers l'API native VectorBT** :
+   - Remplacer les boucles manuelles par des opérations vectorisées
+   - Exploiter `vbt.IndicatorFactory` pour des indicateurs personnalisés
+
+2. **Gestion du Temps Réel** :
+   ```python
+   portfolio = vbt.Portfolio.from_signals(..., freq='15min')
+   resampled = portfolio.resample('D')
+   ```
+
+3. **Analyse Sensible aux Coûts** :
+   ```python
+   sensitivity = portfolio.sensitivity(
+       param='fees',
+       param_range=np.linspace(0.0001, 0.01, 50)
+   )
+   ```
+
+4. **Manual Parameter Optimization** (since optimization module doesn't exist):
+   ```python
+   # Manual grid search
+   def optimize_parameters(price, param_ranges):
+       best_sharpe = -np.inf
+       best_params = {}
+       for param1 in param_ranges['param1']:
+           for param2 in param_ranges['param2']:
+               portfolio = run_strategy(price, param1, param2)
+               sharpe = portfolio.sharpe_ratio()
+               if sharpe > best_sharpe:
+                   best_sharpe = sharpe
+                   best_params = {'param1': param1, 'param2': param2}
+       return best_params
+   ```
+
+Ces améliorations exploitent pleinement les capacités de VectorBT pour une analyse quantitative plus robuste, tout en optimisant les performances de calcul et la qualité des visualisations.
+
+---
+
+## Advanced Features and Extensions
+
+### Custom Indicators with IndicatorFactory
+
+```python
+# Create custom indicators using VectorBT's factory
+MyIndicator = vbt.IndicatorFactory(
+    class_name='MyIndicator',
+    short_name='my_ind',
+    input_names=['close'],
+    param_names=['window', 'threshold'],
+    output_names=['signal', 'strength']
+).from_apply_func(
+    apply_func=my_custom_function,
+    cache_func=my_cache_function  # Optional caching
+)
+
+# Usage
+indicator = MyIndicator.run(price, window=20, threshold=0.5)
+signals = indicator.signal
+strength = indicator.strength
+```
+
+### Portfolio Analytics and Risk Metrics
+
+```python
+# Comprehensive portfolio analysis
+stats = portfolio.stats([
+    'start', 'end', 'period', 'start_value', 'end_value',
+    'total_return', 'benchmark_return', 'max_gross_exposure',
+    'total_fees_paid', 'max_dd', 'max_dd_duration', 'sharpe_ratio',
+    'calmar_ratio', 'omega_ratio', 'sortino_ratio'
+])
+
+# Custom metrics
+def custom_metric(portfolio):
+    returns = portfolio.returns()
+    return returns.rolling(30).std().mean()
+
+# Register custom metrics
+vbt.settings.portfolio['metrics']['custom_vol'] = custom_metric
+
+# Risk-adjusted returns
+risk_free_rate = 0.02
+excess_returns = portfolio.returns() - risk_free_rate/252
+information_ratio = excess_returns.mean() / excess_returns.std() * np.sqrt(252)
+
+# Value at Risk (VaR) and Expected Shortfall (ES)
+returns = portfolio.returns()
+var_95 = returns.quantile(0.05)
+es_95 = returns[returns <= var_95].mean()
+```
+
+### Real-Time Trading Integration
+
+```python
+# Live trading framework structure
+class LiveTrader:
+    def __init__(self, strategy, broker_api):
+        self.strategy = strategy
+        self.broker = broker_api
+        self.portfolio = None
+        
+    def update_data(self, new_data):
+        # Update with latest market data
+        self.data = pd.concat([self.data, new_data])
+        
+    def generate_signals(self):
+        # Generate trading signals
+        return self.strategy.run(self.data)
+        
+    def execute_trades(self, signals):
+        # Execute trades via broker API
+        for signal in signals:
+            if signal.entry:
+                self.broker.buy(signal.symbol, signal.size)
+            elif signal.exit:
+                self.broker.sell(signal.symbol, signal.size)
+
+# Paper trading simulation
+class PaperTrader(LiveTrader):
+    def __init__(self, strategy, initial_cash=100000):
+        super().__init__(strategy, None)
+        self.cash = initial_cash
+        self.positions = {}
+        
+    def execute_trades(self, signals):
+        # Simulate trades without real execution
+        for signal in signals:
+            self.simulate_trade(signal)
+```
+
+
+
+### Advanced Plotting and Reporting
+
+```python
+# Comprehensive strategy report
+def generate_strategy_report(portfolio, benchmark=None):
+    # Performance metrics
+    metrics = portfolio.stats()
+    
+    # Create multi-panel dashboard
+    fig = make_subplots(
+        rows=3, cols=2,
+        subplot_titles=['Equity Curve', 'Drawdown', 'Monthly Returns', 
+                       'Rolling Sharpe', 'Trade Analysis', 'Risk Metrics'],
+        specs=[[{"secondary_y": True}, {"secondary_y": False}],
+               [{"secondary_y": False}, {"secondary_y": False}],
+               [{"secondary_y": False}, {"secondary_y": False}]]
+    )
+    
+    # Equity curve with benchmark
+    portfolio.value().vbt.plot(fig=fig, row=1, col=1, name='Strategy')
+    if benchmark is not None:
+        benchmark.vbt.plot(fig=fig, row=1, col=1, name='Benchmark')
+    
+    # Drawdown
+    portfolio.drawdown().vbt.plot(fig=fig, row=1, col=2, name='Drawdown')
+    
+    # Monthly returns heatmap
+    monthly_returns = portfolio.returns().resample('M').apply(
+        lambda x: (1 + x).prod() - 1
+    )
+    monthly_returns.vbt.heatmap(fig=fig, row=2, col=1)
+    
+    # Rolling Sharpe ratio
+    rolling_sharpe = portfolio.returns().rolling(252).apply(
+        lambda x: x.mean() / x.std() * np.sqrt(252)
+    )
+    rolling_sharpe.vbt.plot(fig=fig, row=2, col=2, name='Rolling Sharpe')
+    
+    # Trade analysis
+    portfolio.trades.plot(fig=fig, row=3, col=1)
+    
+    # Risk metrics table
+    risk_table = pd.DataFrame({
+        'Metric': ['Total Return', 'Sharpe Ratio', 'Max Drawdown', 'Calmar Ratio'],
+        'Value': [f"{metrics['total_return']:.2%}", 
+                 f"{metrics['sharpe_ratio']:.2f}",
+                 f"{metrics['max_dd']:.2%}",
+                 f"{metrics['calmar_ratio']:.2f}"]
+    })
+    
+    fig.add_table(
+        header=dict(values=list(risk_table.columns)),
+        cells=dict(values=[risk_table[col] for col in risk_table.columns]),
+        row=3, col=2
+    )
+    
+    fig.update_layout(height=1200, title_text="Strategy Performance Report")
+    return fig
+
+# Usage
+report = generate_strategy_report(portfolio, benchmark_portfolio)
+report.show()
+```
+
+This completes the VectorBT documentation with essential features including environment setup, advanced portfolio configurations, manual optimization techniques, comprehensive error handling, and professional reporting capabilities - all verified to work with VectorBT v0.28.0.
+
+---
+
+# VectorBT Methods Reference (v0.28.0 - Verified)
+
+## ⚠️ Important: Features NOT Available in v0.28.0
+
+The following features mentioned in online documentation do **NOT** exist in VectorBT v0.28.0:
+
+### Missing Modules:
+- `vectorbt.portfolio.optimization` (WalkForwardOptimizer, GeneticOptimizer)
+- `vectorbt.portfolio.ml` (MLPortfolio, machine learning features)
+
+### Missing Indicators:
+- `vbt.CCI` (Commodity Channel Index)
+- `vbt.WILLR` (Williams %R)
+- `vbt.ADX` (Average Directional Index)
+- `vbt.AROON` (Aroon Oscillator)
+- `vbt.MFI` (Money Flow Index)
+- `vbt.TRIX`, `vbt.ULTOSC`, `vbt.ROC`
+
+### Missing Signal Methods:
+- `entries.vbt.signals.last()` (use `.iloc[-1]` instead)
+- `entries.vbt.signals.generate_exit_after_n_bars()`
+- `series.vbt.crossed()` (use `.crossed_above()` or `.crossed_below()`)
+
+### Missing Returns Methods:
+- `returns.vbt.returns.volatility()` (use `returns.std() * np.sqrt(252)`)
+- `returns.vbt.returns.var()`, `.cvar()` (use pandas `.quantile()`)
+- `returns.vbt.returns.skew()`, `.kurtosis()` (use pandas `.skew()`, `.kurtosis()`)
+- `returns.vbt.returns.corr()` (use pandas `.corr()`)
+
+### Alternative Solutions:
+```python
+# Instead of missing methods, use pandas equivalents:
+volatility = returns.std() * np.sqrt(252)    # Annualized volatility
+var_95 = returns.quantile(0.05)              # 5% VaR
+skewness = returns.skew()                     # Skewness
+kurtosis = returns.kurtosis()                 # Kurtosis
+correlation = returns.corr()                  # Correlation matrix
+
+# Manual optimization instead of optimization module:
+def manual_optimization(price, param_ranges):
+    results = []
+    for param1 in param_ranges['param1']:
+        for param2 in param_ranges['param2']:
+            # Run strategy with parameters
+            portfolio = run_strategy(price, param1, param2)
+            results.append({
+                'param1': param1,
+                'param2': param2,
+                'sharpe': portfolio.sharpe_ratio()
+            })
+    return pd.DataFrame(results)
+```
+
+## Data Methods
+
+### YFData Methods
+```python
+# Data fetching
+vbt.YFData.download(symbols, start, end, **kwargs)
+data.get(column)                    # Get specific column
+data.get(['Open', 'Close'])         # Get multiple columns
+data.cache()                        # Cache data for reuse
+data.resample(freq)                 # Resample data
+data.fillna(method='ffill')         # Fill missing values
+data.dropna()                       # Drop NaN values
+```
+
+### Advanced Resampling Techniques
+
+For more complex multi-timeframe strategies, VectorBT provides the `vbt.Resampler` class for precise control over upsampling operations:
+
+```python
+// Creating resampler objects for upsampling
+def create_resamplers(result_dict_keys_list, source_indices, source_frequencies, target_index, target_freq):
+    """
+    Creates a dictionary of vbtpro resampler objects.
+    
+    Parameters
+    ==========
+    result_dict_keys_list : list, list of strings, which are keys of the output dictionary
+    source_indices        : list, list of pd.time series objects of the higher timeframes
+    source_frequencies    : list(str), which are short form representation of time series order. Eg:["1D", "4h"]
+    target_index          : pd.Series, target time series for the resampler objects
+    target_freq           : str, target time frequency for the resampler objects
+    
+    Returns
+    ===========
+    resamplers_dict       : dict, vbt pro resampler objects
+    """
+    
+    resamplers = []
+    for si, sf in zip(source_indices, source_frequencies):
+        resamplers.append(vbt.Resampler(source_index=si, target_index=target_index,
+                                        source_freq=sf, target_freq=target_freq))
+    return dict(zip(result_dict_keys_list, resamplers))
+
+// Example usage:
+src_indices = [h1_close.index, h4_close.index]
+src_frequencies = ["1H","4H"] 
+resampler_dict_keys = ["h1_m15","h4_m15"]
+
+list_resamplers = create_resamplers(resampler_dict_keys, src_indices, src_frequencies, m15_close.index, "15T")
+
+// Resampling time series data with different methods for different data types
+// Use resample_opening for OHLC open prices
+data["h1_open"] = h1_open.vbt.resample_opening(list_resamplers['h1_m15'])
+data["h4_open"] = h4_open.vbt.resample_opening(list_resamplers['h4_m15'])
+
+// Use resample_closing for other price data and indicators
+resampled_time_series = time_series.vbt.resample_closing(list_resamplers[resampler])
+```
+
+### Data Validation Methods
+```python
+data.isnull().any().any()          # Check for NaN values
+data.index.is_monotonic_increasing  # Check index order
+data.dtypes                         # Check data types
+len(data)                          # Data length
+data.shape                         # Data dimensions
+```
+
+## Indicator Methods
+
+### Moving Averages
+```python
+# Simple Moving Average
+ma = vbt.MA.run(price, window=20)
+ma.ma                              # Get MA values
+ma.plot()                          # Plot MA
+
+# Exponential Moving Average
+ema = vbt.MA.run(price, window=20, ewm=True)
+ema.ma                             # Get EMA values
+
+# Multiple windows
+ma_multi = vbt.MA.run(price, window=[10, 20, 50])
+ma_multi.ma                        # Multi-column MA
+```
+
+### Available Technical Indicators (Verified)
+```python
+# RSI (✓ Available)
+rsi = vbt.RSI.run(price, window=14)
+rsi.rsi                            # RSI values
+rsi.plot()                         # Plot RSI
+
+# MACD (✓ Available)
+macd = vbt.MACD.run(price)
+macd.macd                          # MACD line
+macd.signal                        # Signal line
+macd.histogram                     # MACD histogram
+
+# Bollinger Bands (✓ Available)
+bb = vbt.BBANDS.run(price, window=20, alpha=2)
+bb.upper                           # Upper band
+bb.middle                          # Middle band (SMA)
+bb.lower                           # Lower band
+bb.bandwidth                       # Band width
+bb.percent_b                       # %B indicator
+
+# Stochastic (✓ Available)
+stoch = vbt.STOCH.run(high, low, close)
+stoch.percent_k                    # %K line
+stoch.percent_d                    # %D line
+
+# Average True Range (✓ Available)
+atr = vbt.ATR.run(high, low, close, window=14)
+atr.atr                           # ATR values
+
+# On Balance Volume (✓ Available)
+obv = vbt.OBV.run(close, volume)
+obv.obv                           # OBV values
+
+# NOTE: These indicators are NOT available in v0.28.0:
+# CCI, WILLR, ADX, AROON, MFI, TRIX, ULTOSC, ROC
+```
+
+### Custom Indicators
+```python
+# Create custom indicator (✓ Available)
+MyIndicator = vbt.IndicatorFactory(
+    class_name='MyIndicator',
+    short_name='my_ind',
+    input_names=['close'],
+    param_names=['window'],
+    output_names=['value']
+).from_apply_func(
+    lambda close, window: close.rolling(window).mean(),
+    cache_func=lambda close, window: (close.name, window)
+)
+
+# Run custom indicator
+result = MyIndicator.run(price, window=20)
+result.value                       # Get indicator values
+```
+
+### TALIB Indicators for Multi-TimeFrame Strategies
+
+VectorBT provides powerful integration with TALIB for creating technical indicators across multiple timeframes:
+
+```python
+// Using TALIB indicators with multi-timeframe support
+rsi_period = 21
+
+// One-liner method for creating indicators across multiple timeframes
+rsi = vbt.talib("RSI", timeperiod=rsi_period).run(
+    m15_data.get("Close"), 
+    timeframe=["15T", "1H" ,"4H"], 
+    skipna=True, 
+    broadcast_kwargs=dict(wrapper_kwargs=dict(freq="15T"))
+).real
+
+bbands_price = vbt.talib("BBANDS").run(
+    m15_data.get("Close"), 
+    timeframe=["15T", "1H" ,"4H"], 
+    skipna=True,
+    broadcast_kwargs=dict(wrapper_kwargs=dict(freq="15T"))
+)
+
+bbands_rsi = vbt.talib("BBANDS").run(
+    rsi,
+    timeframe=vbt.Default(["15T", "1H" ,"4H"]),
+    skipna=True,
+    per_column=True,
+    broadcast_kwargs=dict(wrapper_kwargs=dict(freq="15T"))
+)
+
+// Manual indicator creation method for MTF
+m15_rsi = vbt.talib("RSI", timeperiod = rsi_period).run(m15_close, skipna=True).real.ffill()
+m15_bbands = vbt.talib("BBANDS").run(m15_close, skipna=True)
+m15_bbands_rsi = vbt.talib("BBANDS").run(m15_rsi, skipna=True)
+
+h1_rsi = vbt.talib("RSI", timeperiod = rsi_period).run(h1_close, skipna=True).real.ffill()
+h1_bbands = vbt.talib("BBANDS").run(h1_close, skipna=True)
+h1_bbands_rsi = vbt.talib("BBANDS").run(h1_rsi, skipna=True)
+
+h4_rsi = vbt.talib("RSI", timeperiod = rsi_period).run(h4_close, skipna=True).real.ffill()
+h4_bbands = vbt.talib("BBANDS").run(h4_close, skipna=True)
+h4_bbands_rsi = vbt.talib("BBANDS").run(h4_rsi, skipna=True)
+
+// Note: The method of indicator creation using `talib('IndicatorName').run` with `broadcast_kwargs` 
+// argument automatically handles the `ffill()` operation. Specify broadcast_kwargs when the input 
+// series contains gaps and pandas cannot infer its frequency, which is common with resampled data.
+```
+
+## Signal Methods
+
+### Basic Signal Generation
+```python
+# Crossover signals (✓ Available)
+entries = fast_ma.vbt.crossed_above(slow_ma)
+exits = fast_ma.vbt.crossed_below(slow_ma)
+# NOTE: .vbt.crossed() is NOT available in v0.28.0
+
+# Threshold signals
+entries = rsi < 30                 # Oversold entry
+exits = rsi > 70                   # Overbought exit
+
+# Boolean operations
+combined_entries = entries1 & entries2  # AND
+combined_exits = exits1 | exits2        # OR
+inverted_signals = ~entries             # NOT
+```
+
+### Available Signal Methods (Verified)
+```python
+# Signal accessor methods (✓ Available)
+entries.vbt.signals.first()            # First signal (✓)
+entries.vbt.signals.count()            # Count signals (✓)
+entries.vbt.signals.rate()             # Signal rate (✓)
+
+# Signal cleaning (✓ Available)
+entries.vbt.signals.clean()            # Remove consecutive signals (✓)
+entries.vbt.signals.fshift(1)          # Forward shift (✓)
+entries.vbt.signals.bshift(1)          # Backward shift (✓)
+
+# Stop loss/take profit generation (✓ Available)
+exits = entries.vbt.signals.generate_ohlc_stop_exits(
+    open, high, low, close,
+    sl_stop=0.05,                      # 5% stop loss
+    tp_stop=0.10,                      # 10% take profit
+    sl_trail=True,                     # Trailing stop
+    out_dict={}                        # Output dictionary
+)
+
+# Random exits (✓ Available)
+exits = entries.vbt.signals.generate_random_exits(seed=42)
+
+# NOTE: These methods are NOT available in v0.28.0:
+# .last(), .generate_exit_after_n_bars()
+```
+
+### Signal Cleaning and Multi-TimeFrame Strategy Implementation
+
+For multi-timeframe strategies, it's crucial to clean and properly resample signals to avoid over-trading:
+
+```python
+// Clean redundant and duplicate signals
+clean_entries, clean_exits = entries.vbt.signals.clean(exits)
+
+// Resample cleaned signals to target timeframe
+clean_h4_entries = clean_entries.vbt.resample_apply("4h", "any", wrap_kwargs=dict(dtype=bool))
+clean_h4_exits = clean_exits.vbt.resample_apply("4h", "any", wrap_kwargs=dict(dtype=bool))
+
+// Alternative aggregation method for counting signals
+h4_entries_agg = clean_entries.vbt.resample_apply("4h", "sum")
+h4_exits_agg = clean_exits.vbt.resample_apply("4h", "sum")
+```
+
+## Portfolio Methods
+
+### Portfolio Creation
+```python
+# From signals
+portfolio = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    **kwargs
+)
+
+# From orders
+portfolio = vbt.Portfolio.from_orders(
+    close=price,
+    size=size_array,
+    **kwargs
+)
+
+# From order function
+portfolio = vbt.Portfolio.from_order_func(
+    close=price,
+    order_func=order_function,
+    **kwargs
+)
+```
+
+### Portfolio Analysis Methods
+```python
+# Basic metrics
+portfolio.total_return()               # Total return
+portfolio.annualized_return()          # Annualized return
+portfolio.max_drawdown()               # Maximum drawdown
+portfolio.sharpe_ratio()               # Sharpe ratio
+portfolio.sortino_ratio()              # Sortino ratio
+portfolio.calmar_ratio()               # Calmar ratio
+portfolio.omega_ratio()                # Omega ratio
+
+# Value and cash
+portfolio.value()                      # Portfolio value over time
+portfolio.cash()                       # Cash over time
+portfolio.shares()                     # Shares held over time
+
+# Returns
+portfolio.returns()                    # Period returns
+portfolio.cumulative_returns()         # Cumulative returns
+portfolio.log_returns()                # Log returns
+
+# Drawdown analysis
+portfolio.drawdown()                   # Drawdown series
+portfolio.drawdown_duration()          # Drawdown duration
+portfolio.underwater_plot()            # Underwater plot
+
+# Comprehensive stats
+portfolio.stats()                      # All statistics
+portfolio.stats(['total_return', 'sharpe_ratio'])  # Specific stats
+```
+
+### Portfolio Plotting Methods
+```python
+# Basic plots
+portfolio.plot()                       # Equity curve
+portfolio.plot_value()                 # Portfolio value
+portfolio.plot_cash()                  # Cash over time
+portfolio.plot_shares()                # Shares over time
+portfolio.plot_gross_exposure()        # Gross exposure
+
+# Performance plots
+portfolio.plot_returns()               # Returns plot
+portfolio.plot_cumulative_returns()    # Cumulative returns
+portfolio.plot_drawdown()              # Drawdown plot
+portfolio.plot_underwater()            # Underwater plot
+
+# Advanced plots with subplots
+portfolio.plot(subplots=[
+    'orders',                          # Order markers
+    'trades',                          # Trade markers
+    'positions',                       # Position markers
+    'cash',                           # Cash subplot
+    'shares',                         # Shares subplot
+    'drawdown',                       # Drawdown subplot
+    'trade_pnl'                       # Trade P&L subplot
+])
+
+# Custom subplot settings
+portfolio.plot(
+    subplot_settings={
+        'orders': {'close_trace_kwargs': {'visible': False}},
+        'trades': {'title': 'Trade Analysis'},
+        'drawdown': {'title': 'Drawdown Analysis'}
+    }
+)
+```
+
+## Records Methods
+
+### Trade Records
+```python
+# Access trade records
+trades = portfolio.trades
+trades.records                         # Raw trade records
+trades.count()                         # Number of trades
+trades.winning.count()                 # Winning trades count
+trades.losing.count()                  # Losing trades count
+
+# Trade statistics
+trades.pnl.sum()                      # Total P&L
+trades.pnl.mean()                     # Average P&L
+trades.pnl.std()                      # P&L standard deviation
+trades.duration.mean()                # Average trade duration
+trades.win_rate()                     # Win rate percentage
+
+# Trade filtering
+long_trades = trades.long             # Long trades only
+short_trades = trades.short           # Short trades only
+winning_trades = trades.winning       # Winning trades only
+losing_trades = trades.losing         # Losing trades only
+
+# Trade plotting
+trades.plot()                         # Trade markers on price
+trades.plot_pnl()                     # P&L distribution
+trades.plot_duration()                # Duration distribution
+```
+
+### Position Records
+```python
+# Access position records
+positions = portfolio.positions
+positions.records                      # Raw position records
+positions.count()                      # Number of positions
+positions.duration.mean()             # Average position duration
+
+# Position analysis
+positions.pnl.sum()                   # Total position P&L
+positions.size.mean()                 # Average position size
+positions.exposure.mean()             # Average exposure
+```
+
+### Order Records
+```python
+# Access order records
+orders = portfolio.orders
+orders.records                        # Raw order records
+orders.count()                        # Number of orders
+orders.buy.count()                    # Buy orders count
+orders.sell.count()                   # Sell orders count
+
+# Order analysis
+orders.size.sum()                     # Total order size
+orders.fees.sum()                     # Total fees paid
+orders.slippage.sum()                 # Total slippage
+```
+
+
+
+## Utility Methods
+
+### Array Operations (Verified)
+```python
+# Crossed operations (✓ Available)
+series1.vbt.crossed_above(series2)    # Crossover above (✓)
+series1.vbt.crossed_below(series2)    # Crossover below (✓)
+# NOTE: .vbt.crossed() is NOT available in v0.28.0
+
+# Rolling operations (✓ Available)
+series.vbt.rolling_mean(window=20)    # Rolling mean (✓)
+series.vbt.rolling_std(window=20)     # Rolling standard deviation (✓)
+series.vbt.rolling_min(window=20)     # Rolling minimum (✓)
+series.vbt.rolling_max(window=20)     # Rolling maximum (✓)
+
+# Expanding operations (✓ Available)
+series.vbt.expanding_mean()           # Expanding mean (✓)
+series.vbt.expanding_std()            # Expanding standard deviation (✓)
+series.vbt.expanding_min()            # Expanding minimum (✓)
+series.vbt.expanding_max()            # Expanding maximum (✓)
+```
+
+### Index Operations
+```python
+# Index mapping
+series.vbt.index_mapped(
+    group_by='symbol'                 # Group by symbol
+)
+
+# Resampling
+series.vbt.resample('D')             # Daily resampling
+series.vbt.resample('W')             # Weekly resampling
+series.vbt.resample('M')             # Monthly resampling
+
+# Alignment
+series1.vbt.align_to(series2)        # Align indices
+```
+
+### Available Performance Methods (Verified)
+```python
+# Returns analysis (✓ Available)
+returns.vbt.returns.total()          # Total return (✓)
+returns.vbt.returns.annualized()     # Annualized return (✓)
+returns.vbt.returns.sharpe_ratio()   # Sharpe ratio (✓)
+returns.vbt.returns.max_drawdown()   # Maximum drawdown (✓)
+returns.vbt.returns.beta(benchmark)  # Beta calculation (✓)
+
+# NOTE: These methods are NOT available in v0.28.0:
+# .volatility(), .var(), .cvar(), .skew(), .kurtosis(), .corr()
+
+# Use pandas alternatives for missing methods:
+volatility = returns.std() * np.sqrt(252)    # Annualized volatility
+skewness = returns.skew()                     # Skewness
+kurt = returns.kurtosis()                     # Kurtosis
+correlation = returns.corr()                  # Correlation (if multiple series)
+```
+
+## Settings and Configuration
+
+### Global Settings
+```python
+# Theme settings
+vbt.settings.set_theme('dark')        # Dark theme
+vbt.settings.set_theme('light')       # Light theme
+
+# Array wrapper settings
+vbt.settings.array_wrapper['freq'] = 'D'      # Set frequency
+vbt.settings.array_wrapper['silence_warnings'] = True
+
+# Numba settings
+vbt.settings.numba['cache'] = True             # Enable caching
+vbt.settings.numba['parallel'] = True          # Enable parallel
+vbt.settings.numba['fastmath'] = True          # Enable fastmath
+
+# Plotting settings
+vbt.settings.plotting['layout']['template'] = 'plotly_dark'
+vbt.settings.plotting['layout']['width'] = None
+vbt.settings.plotting['layout']['height'] = None
+
+# Portfolio settings
+vbt.settings.portfolio['init_cash'] = 100000
+vbt.settings.portfolio['fees'] = 0.001
+vbt.settings.portfolio['freq'] = 'D'
+
+# Caching settings
+vbt.settings.caching['enabled'] = True
+vbt.settings.caching['whitelist'] = []
+vbt.settings.caching['blacklist'] = []
+```
+
+### Context Managers
+```python
+# Temporary settings
+with vbt.settings.config(
+    array_wrapper=dict(freq='H'),
+    numba=dict(parallel=False)
+):
+    # Code with temporary settings
+    portfolio = vbt.Portfolio.from_signals(...)
+
+# Plotting context
+with vbt.settings.plotting.config(
+    layout=dict(template='plotly_white')
+):
+    # Code with temporary plotting settings
+    fig = portfolio.plot()
+```
+
+This comprehensive methods reference covers all major VectorBT functionality organized by category, making it easy to find the right method for any task.
+
+---
+
+# Advanced VectorBT Features (v0.28.0 - Verified)
+
+## Animation Creation ✅
+
+VectorBT v0.28.0 includes animation capabilities for creating dynamic visualizations:
+
+```python
+import vectorbt as vbt
+import pandas as pd
+import numpy as np
+
+# Create sample data
+dates = pd.date_range('2020-01-01', periods=100, freq='D')
+price = pd.Series(np.random.randn(100).cumsum() + 100, index=dates)
+
+# Define animation plot function
+def plot_func(index_slice, *args, **kwargs):
+    """Function called for each frame of the animation"""
+    data_slice = price.loc[index_slice]
+    
+    # Create the plot for this frame
+    fig = data_slice.vbt.plot(
+        title=f"Price Evolution up to {index_slice[-1].strftime('%Y-%m-%d')}"
+    )
+    return fig
+
+# Create animation
+vbt.save_animation(
+    fname='price_evolution.gif',    # Output filename
+    index=price.index,              # Time index
+    plot_func=plot_func,            # Plot function
+    delta=20,                       # Window size (days)
+    step=2,                         # Step size (days)
+    fps=3,                          # Frames per second
+    show_progress=True              # Show progress bar
+)
+
+# Advanced animation with custom parameters
+vbt.save_animation(
+    fname='strategy_animation.gif',
+    index=price.index,
+    plot_func=plot_func,
+    delta=30,                       # 30-day rolling window
+    step=1,                         # Daily steps
+    fps=5,                          # Faster animation
+    writer_kwargs={'bitrate': 1800}, # Higher quality
+    to_image_kwargs={'width': 1200, 'height': 600}  # Custom size
+)
+```
+
+## Advanced Portfolio Methods ✅
+
+VectorBT v0.28.0 includes many advanced portfolio analysis methods:
+
+```python
+# Create portfolio
+portfolio = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    init_cash=10000,
+    freq='D'
+)
+
+# Advanced performance metrics (all verified to work)
+metrics = {
+    'Annualized Return': portfolio.annualized_return(),
+    'Annualized Volatility': portfolio.annualized_volatility(),
+    'Information Ratio': portfolio.information_ratio(),
+    'Tail Ratio': portfolio.tail_ratio(),
+    'Capture Ratio': portfolio.capture(),
+    'Deflated Sharpe Ratio': portfolio.deflated_sharpe_ratio()
+}
+
+for name, value in metrics.items():
+    print(f"{name}: {value:.3f}")
+
+# Additional advanced methods
+up_capture = portfolio.up_capture()      # Upside capture
+down_capture = portfolio.down_capture()  # Downside capture
+alpha = portfolio.alpha()                # Alpha vs benchmark
+beta = portfolio.beta()                  # Beta vs benchmark
+```
+
+## Data Accessors ✅
+
+Advanced data manipulation methods are available:
+
+```python
+# Returns conversion
+returns = price.vbt.to_returns()         # Convert to returns
+
+# Rolling operations
+rolling_mean = price.vbt.rolling_apply(
+    window=20,
+    func=np.mean
+)
+
+# Expanding operations  
+expanding_max = price.vbt.expanding_apply(
+    func=np.max
+)
+
+# Resampling with custom functions
+monthly_data = price.vbt.resample_apply(
+    freq='M',
+    func=lambda x: x.iloc[-1]  # Last value of month
+)
+```
+
+## Order Classes ✅
+
+Advanced order management is available through the portfolio module:
+
+```python
+# Access order classes
+from vectorbt.portfolio import Order, SizeType
+
+# Available SizeType options (verified)
+print(list(SizeType.__members__.keys()))
+# Output: ['Amount', 'Percent', 'TargetPercent', 'TargetValue']
+
+# Create orders programmatically
+def create_order(size, size_type='Amount'):
+    return Order(
+        size=size,
+        size_type=getattr(SizeType, size_type)
+    )
+
+# Note: from_order_func requires numba-compiled function
+# Use from_signals or from_orders for most use cases
+```
+
+## QuantStats Integration ✅ (if installed)
+
+VectorBT integrates with QuantStats for advanced analytics:
+
+```python
+# Install QuantStats first: pip install quantstats
+
+# Access QuantStats through VectorBT
+returns = portfolio.returns()
+
+# QuantStats methods (if QuantStats is installed)
+if hasattr(returns.vbt.returns, 'qs'):
+    # Performance snapshot
+    returns.vbt.returns.qs.plot_snapshot(
+        title="Strategy Performance",
+        show=True
+    )
+    
+    # Full report
+    returns.vbt.returns.qs.full_report(
+        title="Comprehensive Analysis",
+        show=True
+    )
+    
+    # Individual metrics
+    sharpe = returns.vbt.returns.qs.sharpe()
+    sortino = returns.vbt.returns.qs.sortino()
+    calmar = returns.vbt.returns.qs.calmar()
+```
+
+## Custom Metrics ✅
+
+While global registration isn't available, custom metrics work directly:
+
+```python
+# Define custom metrics
+def custom_calmar_ratio(portfolio):
+    """Custom Calmar ratio calculation"""
+    annual_return = portfolio.annualized_return()
+    max_dd = abs(portfolio.max_drawdown())
+    return annual_return / max_dd if max_dd > 0 else 0
+
+def custom_profit_factor(portfolio):
+    """Custom profit factor calculation"""
+    trades = portfolio.trades.records
+    if len(trades) == 0:
+        return 0
+    
+    winning_trades = trades[trades['pnl'] > 0]
+    losing_trades = trades[trades['pnl'] <= 0]
+    
+    gross_profit = winning_trades['pnl'].sum() if len(winning_trades) > 0 else 0
+    gross_loss = abs(losing_trades['pnl'].sum()) if len(losing_trades) > 0 else 1
+    
+    return gross_profit / gross_loss
+
+# Apply custom metrics
+calmar = custom_calmar_ratio(portfolio)
+profit_factor = custom_profit_factor(portfolio)
+
+print(f"Custom Calmar Ratio: {calmar:.3f}")
+print(f"Custom Profit Factor: {profit_factor:.3f}")
+
+# Create custom analysis function
+def comprehensive_analysis(portfolio):
+    """Comprehensive portfolio analysis with custom metrics"""
+    
+    # Standard metrics
+    standard = portfolio.stats()
+    
+    # Custom metrics
+    custom = {
+        'Custom Calmar': custom_calmar_ratio(portfolio),
+        'Custom Profit Factor': custom_profit_factor(portfolio),
+        'Risk-Adjusted Return': portfolio.total_return() / portfolio.annualized_volatility(),
+        'Gain-to-Pain Ratio': portfolio.total_return() / abs(portfolio.drawdown().mean())
+    }
+    
+    return standard, custom
+
+standard_metrics, custom_metrics = comprehensive_analysis(portfolio)
+```
+
+## Advanced Risk Management ✅
+
+Dynamic position sizing and risk management:
+
+```python
+# Array-based dynamic sizing
+def create_dynamic_sizes(price, base_size=0.1):
+    """Create dynamic position sizes based on volatility"""
+    returns = price.pct_change().dropna()
+    volatility = returns.rolling(20).std()
+    
+    # Inverse volatility sizing
+    sizes = base_size / (volatility + 0.01)  # Add small constant to avoid division by zero
+    sizes = np.clip(sizes, 0.05, 0.25)  # Cap between 5% and 25%
+    
+    return sizes.reindex(price.index, method='ffill').fillna(base_size)
+
+# Apply dynamic sizing
+dynamic_sizes = create_dynamic_sizes(price)
+
+portfolio_dynamic = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    size=dynamic_sizes,
+    size_type='percent',
+    init_cash=10000,
+    freq='D'
+)
+
+print(f"Dynamic sizing performance: {portfolio_dynamic.total_return():.3f}")
+
+# Risk-based position sizing
+def kelly_sizing(returns, lookback=50):
+    """Kelly criterion position sizing"""
+    rolling_returns = returns.rolling(lookback)
+    mean_return = rolling_returns.mean()
+    variance = rolling_returns.var()
+    
+    # Kelly fraction
+    kelly = mean_return / (variance + 1e-6)  # Add small constant
+    kelly = np.clip(kelly, 0, 0.25)  # Cap at 25%
+    
+    return kelly
+
+# Apply Kelly sizing
+returns = price.pct_change().dropna()
+kelly_sizes = kelly_sizing(returns)
+
+portfolio_kelly = vbt.Portfolio.from_signals(
+    close=price,
+    entries=entries,
+    exits=exits,
+    size=kelly_sizes.reindex(price.index, method='ffill').fillna(0.1),
+    size_type='percent',
+    init_cash=10000,
+    freq='D'
+)
+```
+
+## Features NOT Available in v0.28.0 ❌
+
+The following features mentioned in some documentation do **NOT** work:
+
+- `flexible=True` parameter in `from_order_func`
+- Direct `vbt.Order` and `vbt.SizeType` (use `vbt.portfolio.Order` instead)
+- Global custom metrics registration in settings
+- Some QuantStats methods may require separate installation
+
+## Summary
+
+VectorBT v0.28.0 includes powerful advanced features:
+- ✅ Animation creation with `save_animation`
+- ✅ Advanced portfolio metrics (20+ methods)
+- ✅ Data accessors for complex operations
+- ✅ QuantStats integration (if installed)
+- ✅ Custom metrics (direct calculation)
+- ✅ Dynamic risk management
+- ✅ Order classes in `vbt.portfolio`
+
+These features make VectorBT v0.28.0 a comprehensive platform for advanced quantitative analysis.

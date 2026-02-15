@@ -1,0 +1,22 @@
+# Supertrend with Grid Strategy Configuration
+
+parameters:
+  st_period: 10
+  st_multiplier: 3.0
+  grid_levels: 5
+  grid_range: 0.05
+  initial_cash: 10000
+  fee: 0.001
+  freq: "1h"
+
+data_source: "csv"
+csv_path: 
+  - "data/BTCUSD_1h_2011-2025.csv"
+  - "data/EURUSD_1H_2009-2025.csv"
+  - "data/ETH_1h_2017-2020.csv"
+
+optimization_grid:  
+  st_period: [7, 21, 7]
+  st_multiplier: [1.0, 4.0, 1.0]
+  grid_levels: [3, 10, 2]
+  grid_range: [0.02, 0.10, 0.02]

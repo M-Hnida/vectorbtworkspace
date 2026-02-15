@@ -1,0 +1,92 @@
+# Volatility Breakout v3 Strategy Configuration
+# ==============================================
+#
+# This strategy uses First-Passage Time theory to filter false breakouts,
+# with ATR-based exits to prevent the "volatility trap" during crypto pumps.
+#
+# Key improvements:
+# - ATR stops instead of log-sigma (stable during parabolic moves)
+# - Trend filter (SMA200) prevents fighting the drift
+# - Wider invalidation (1.0σ) survives shakeouts
+# - Auto long-only for high-drift assets (BTC, NDX, etc.)
+
+# =============================================================================
+# STRATEGY PARAMETERS
+# =============================================================================
+
+parameters:
+  # Entry logic
+  entry_threshold: 0.5        # Enter at +0.5σ breakout
+  invalidation: 1.0           # Invalidate if -1.0σ hit first (wider = more signals)
+  compression_threshold: -1.0 # Only enter when vol z-score < this (compression)
+  
+  # ATR-based exits (more stable than log-sigma)
+  stop_atr_mult: 2.0          # Stop at entry - 2*ATR
+  target_atr_mult: 4.0        # Target at entry + 4*ATR (2:1 reward)
+  max_bars: 50                # Time stop fallback
+  
+  # Filters
+  trend_filter: true          # Only long in uptrend, short in downtrend
+  long_only: false            # Auto-detected for BTC/NDX, override here
+  
+  # Trading parameters
+  initial_cash: 10000
+  fee: 0.0004                 # 4 bps
+  freq: "1h"
+
+# =============================================================================
+# OPTIMIZATION GRID
+# =============================================================================
+
+optimization_grid:
+  entry_threshold: [0.3, 0.7, 0.1]       # [start, end, step]
+  invalidation: [0.5, 1.5, 0.25]         # Wider = more signals but noisier
+  stop_atr_mult: [1.5, 3.0, 0.5]         # Tighter = more stops, looser = bigger losses
+  target_atr_mult: [3.0, 6.0, 1.0]       # Higher = more time in trade
+  compression_threshold: [-1.5, -0.5, 0.25]  # Lower = more compression required
+
+# =============================================================================
+# DATA CONFIGURATION
+# =============================================================================
+
+data:
+  path: "data/EURUSD_1h_2009-2025.csv"
+  primary_timeframe: "1h"
+
+# =============================================================================
+# ASSET-SPECIFIC OVERRIDES
+# =============================================================================
+# These are applied when running multi-asset backtests
+
+asset_overrides:
+  BTCUSD:
+    long_only: true           # Force long-only (secular uptrend)
+    stop_atr_mult: 2.5        # Slightly wider stops for crypto vol
+    target_atr_mult: 5.0      # Larger targets due to momentum
+    
+  NASDAQ:
+    long_only: true           # Force long-only (equity uptrend)
+    
+  EURUSD:
+    long_only: false          # Mean-reverting, both directions ok
+    invalidation: 0.75        # Tighter invalidation for FX
+    compression_threshold: -0.75  # Less compression required
+
+# =============================================================================
+# NOTES ON TUNING
+# =============================================================================
+#
+# If you're getting too many stopped-out trades:
+#   → Increase stop_atr_mult (e.g., 2.5 → 3.0)
+#   → Increase invalidation (e.g., 1.0 → 1.25)
+#
+# If you're missing the big moves:
+#   → Decrease entry_threshold (e.g., 0.5 → 0.3)
+#   → Decrease compression_threshold (e.g., -1.0 → -0.75)
+#
+# If shorts are killing you on crypto/stocks:
+#   → Set long_only: true or let auto-detection handle it
+#
+# If FX is too noisy:
+#   → Tighten invalidation (e.g., 1.0 → 0.75)
+#   → Consider disabling trend_filter (FX is more mean-reverting)
