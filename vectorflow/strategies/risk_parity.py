@@ -100,7 +100,6 @@ def create_portfolio(
         close=close,
         size=weights,
         size_type="targetpercent",
-        freq="4h",
         **kwargs
     )
     

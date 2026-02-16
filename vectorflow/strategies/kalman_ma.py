@@ -27,38 +27,22 @@ from numba import njit
 from typing import Dict, Any
 
 
-@njit
 def kalman_filter(data: np.ndarray, q: float = 1e-5, r: float = 0.001) -> np.ndarray:
-    """
-    Numba-accelerated Kalman Filter for price smoothing.
-    
-    Args:
-        data: Price array (close prices)
-        q: Process noise covariance
-        r: Measurement noise covariance
-        
-    Returns:
-        Filtered price array
-    """
+    """Kalman Filter for price smoothing."""
+    data = np.asarray(data, dtype=np.float64)
     n = len(data)
     xhat = np.zeros(n)
     p = np.zeros(n)
-    xhat_minus = np.zeros(n)
-    p_minus = np.zeros(n)
-    k = np.zeros(n)
     
-    xhat[0] = data[0]
+    xhat[0] = float(data[0])
     p[0] = 1.0
     
     for i in range(1, n):
-        # Prediction
-        xhat_minus[i] = xhat[i-1]
-        p_minus[i] = p[i-1] + q
-        
-        # Update
-        k[i] = p_minus[i] / (p_minus[i] + r)
-        xhat[i] = xhat_minus[i] + k[i] * (data[i] - xhat_minus[i])
-        p[i] = (1 - k[i]) * p_minus[i]
+        xhat_minus = xhat[i-1]
+        p_minus = p[i-1] + q
+        k = p_minus / (p_minus + r)
+        xhat[i] = xhat_minus + k * (float(data[i]) - xhat_minus)
+        p[i] = (1 - k) * p_minus
         
     return xhat
 
@@ -89,15 +73,20 @@ def create_portfolio(
     target_vol = params.get("target_volatility", 0.25)
     vol_window = params.get("vol_window", 10)
     
+    # Extract close prices if DataFrame
+    if hasattr(close, 'columns'):
+        close_price = close['close'] if 'close' in close.columns else close.iloc[:, 0]
+    else:
+        close_price = close
+    
     # Calculate returns for volatility
-    returns = close.pct_change()
+    returns = close_price.pct_change()
     
     # Calculate annualization factor (assuming 4h timeframe, 24/7 markets)
-    # 365 days * 6 bars/day = 2190 bars/year
     annualization = np.sqrt(2190)
     
     # Apply Kalman Filter
-    kalman_price = kalman_filter(close.values, q=kalman_q, r=kalman_r)
+    kalman_price = kalman_filter(close_price.values, q=kalman_q, r=kalman_r)
     kalman_series = pd.Series(kalman_price, index=close.index)
     
     # Calculate MA on Kalman-filtered price
@@ -119,7 +108,7 @@ def create_portfolio(
     
     # Create portfolio
     portfolio = vbt.Portfolio.from_signals(
-        close=close,
+        close=close_price,
         entries=long_entries,
         exits=long_exits,
         size=sizing,
