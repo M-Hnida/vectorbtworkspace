@@ -1,0 +1,16 @@
+parameters:
+  period: "2y"
+  initial_cash: 100000
+  fee: 0.001
+  symbols:
+    - "EURUSD=X"
+    - "USDJPY=X"
+    - "^GSPC"
+    - "BTC-USD"
+    - "GC=F"
+    - "CL=F"
+    - "KC=F"
+
+csv_path: []
+
+optimization_grid: {}

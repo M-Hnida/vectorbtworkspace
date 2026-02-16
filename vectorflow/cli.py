@@ -126,7 +126,7 @@ class StrategyEngine:
         # Strategies can handle multi-asset if needed via config
         try:
             self.primary_data = load_ohlc_csv(csv_paths[0], start_date=start_date)
-            logger.info(f"✅ Loaded {len(self.primary_data)} bars from {csv_paths[0]}")
+            logger.info(f"[OK] Loaded {len(self.primary_data)} bars from {csv_paths[0]}")
         except Exception as e:
             raise ValueError(f"Failed to load data from {csv_paths[0]}: {e}")
 
@@ -141,7 +141,7 @@ class StrategyEngine:
 
     def run_optimization(self) -> Dict[str, Any]:
         """Run parameter optimization."""
-        logger.info("🔧 Running Parameter Optimization...")
+        logger.info("[OPT] Running Parameter Optimization...")
         grid = get_optimization_grid(self.strategy_name)
         if not grid:
             logger.warning("No optimization grid found. Skipping.")
@@ -151,17 +151,17 @@ class StrategyEngine:
 
     def run_monte_carlo(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Run Monte Carlo parameter sensitivity analysis."""
-        logger.info("🎲 Running Parameter Monte Carlo Analysis...")
+        logger.info("[MC] Running Parameter Monte Carlo Analysis...")
         return run_monte_carlo_analysis(self.primary_data, self.strategy_name, params)
 
     def run_path_monte_carlo(self, portfolio) -> Dict[str, Any]:
         """Run Path Randomization Monte Carlo analysis."""
-        logger.info("🎲 Running Path Monte Carlo Analysis...")
+        logger.info("[MC] Running Path Monte Carlo Analysis...")
         return run_path_randomization_mc(portfolio)
 
     def run_walk_forward(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Run Walk-Forward analysis."""
-        logger.info("📈 Running Walk-Forward Analysis...")
+        logger.info("[WF] Running Walk-Forward Analysis...")
         wf_context = SimpleNamespace(
             name=self.strategy_name,
             parameters=params,
@@ -235,7 +235,7 @@ class StrategyEngine:
 
     def _generate_plots(self, results_dict: Dict, mode: str):
         """Generate all relevant plots."""
-        logger.info("📊 Generating Visualizations...")
+        logger.info("[PLOT] Generating Visualizations...")
 
         # Get portfolio to plot (prefer optimized over default)
         portfolio = results_dict.get("optimized_portfolio") or results_dict.get(
@@ -266,22 +266,22 @@ class CLI:
                 idx = int(choice) - 1
                 if 0 <= idx < len(options):
                     return idx
-                print(f"❌ Invalid choice. Please enter 1-{len(options)}")
+                print(f"[ERR] Invalid choice. Please enter 1-{len(options)}")
             except ValueError:
                 print("❌ Please enter a number.")
 
     @staticmethod
     def interactive_mode():
-        print("\n🚀 VectorFlow Strategy Runner")
+        print("\n>> VectorFlow Strategy Runner")
         print("=============================")
 
         # 1. Select Strategy
         strategies = get_available_strategies()
         if not strategies:
-            print("❌ No strategies found in 'vectorflow/strategies/'")
+            print("[ERR] No strategies found in 'vectorflow/strategies/'")
             return
 
-        print("\n📊 Available Strategies:")
+        print("\nAvailable Strategies:")
         for i, s in enumerate(strategies, 1):
             print(f"{i}. {s}")
 
@@ -289,7 +289,7 @@ class CLI:
         strategy_name = strategies[s_idx]
 
         # 2. Select Time Range
-        print("\n📅 Time Range:")
+        print("\nTime Range:")
         ranges = ["3m", "6m", "1y", "2y", "Full History"]
         for i, r in enumerate(ranges, 1):
             print(f"{i}. {r}")
@@ -302,7 +302,7 @@ class CLI:
             time_range = "2y"  # Default handling
 
         # 3. Select Mode
-        print("\n⚙️  Analysis Mode:")
+        print("\nAnalysis Mode:")
         modes = [
             ("Quick Analysis (Backtest Only)", "fast"),
             ("Full Analysis (Opt + Param MC + WF)", "full"),
@@ -321,7 +321,7 @@ class CLI:
 
     @staticmethod
     def run(strategy_name: str, time_range: str, mode: str):
-        print(f"\n▶ Starting {mode.upper()} analysis for '{strategy_name}'...")
+        print(f"\n>> Starting {mode.upper()} analysis for '{strategy_name}'...")
 
         engine = StrategyEngine(strategy_name)
         try:
@@ -336,28 +336,28 @@ class CLI:
                     ].get("default_portfolio")
                     if pf:
                         print("\n" + "=" * 60)
-                        print("📊 PERFORMANCE SUMMARY")
+                        print("PERFORMANCE SUMMARY")
                         print("=" * 60)
                         print(pf.stats())
                         print(f"\nBeta: {pf.beta():.3f}")
                         print("=" * 60)
                 else:
                     CLI.print_summary(results["results"])
-                print("\n✅ Analysis Completed Successfully!")
+                print("\n[OK] Analysis Completed Successfully!")
             else:
-                print(f"\n❌ Analysis Failed: {results.get('error')}")
+                print(f"\n[ERR] Analysis Failed: {results.get('error')}")
 
         except KeyboardInterrupt:
-            print("\n⚠️  Analysis interrupted by user.")
+            print("\n[!] Analysis interrupted by user.")
         except Exception as e:
             logger.exception("Critical Error")
-            print(f"\n❌ Critical Error: {e}")
+            print(f"\n[ERR] Critical Error: {e}")
 
     @staticmethod
     def print_summary(results: Dict):
         """Print a nice summary of the results."""
         print("\n" + "=" * 60)
-        print("📊 PERFORMANCE SUMMARY")
+        print("PERFORMANCE SUMMARY")
         print("=" * 60)
 
         # Get portfolio (prefer optimized over default)
@@ -367,7 +367,24 @@ class CLI:
             print("No portfolio results to display.")
             return
 
-        print(f"Return: {pf.total_return() * 100:.2f}%")
+        # Get close prices for Buy & Hold benchmark
+        close = pf.close
+        
+        # Calculate Buy & Hold benchmark
+        import vectorbt as vbt
+        init_cash = pf.init_cash
+        bh_portfolio = vbt.Portfolio.from_holding(
+            close=close, 
+            init_cash=init_cash,
+            fees=pf.fees,
+            freq=pf.freq,
+        )
+        bh_return = bh_portfolio.total_return() * 100
+        strategy_return = pf.total_return() * 100
+        excess_return = strategy_return - bh_return
+        
+        # Print strategy metrics
+        print(f"Return: {strategy_return:.2f}%")
         print(f"Sharpe: {pf.sharpe_ratio():.3f}")
         print(f"Max DD: {pf.max_drawdown() * 100:.2f}%")
 
@@ -380,6 +397,12 @@ class CLI:
         else:
             raise ValueError("No trades found in portfolio.")
 
+        # Buy & Hold comparison
+        print("-" * 60)
+        beat_bh = "[WIN]" if strategy_return > bh_return else "[LOSE]"
+        print(f"Buy & Hold: {bh_return:.2f}%")
+        print(f"Strategy vs B&H: {excess_return:+.2f}% {beat_bh}")
+        
         print("\n" + "=" * 60)
 
 

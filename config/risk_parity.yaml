@@ -1,0 +1,13 @@
+parameters:
+  signal_window: 50
+  vol_lookback: 20
+  vol_threshold: 2.0
+  initial_cash: 100000
+  fee: 0.0005
+
+csv_path: []
+
+optimization_grid:
+  signal_window: [30, 100, 10]
+  vol_lookback: [10, 50, 10]
+  vol_threshold: [1.5, 3.0, 0.5]

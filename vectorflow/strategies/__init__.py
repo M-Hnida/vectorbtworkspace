@@ -1,19 +1,13 @@
-#!/usr/bin/env python3
 """
-DEPRECATED - Use strategy_registry.py instead
-This file is kept for backward compatibility only.
+Strategy package for VectorFlow.
+Strategies are auto-discovered by portfolio_builder.py at runtime.
 """
 
-# Deprecated functions - use strategy_registry.py for new code
-def get_required_timeframes(strategy_name: str, params: dict = None):
-    """DEPRECATED - Use strategy_registry.py"""
-    return ["1h"]
+# Available strategies are dynamically discovered from this directory.
+# Each strategy module must export a `create_portfolio(data, params)` function.
 
-def get_strategy_function(strategy_name: str):
-    """DEPRECATED - Use strategy_registry.py"""
-    raise NotImplementedError("Use strategy_registry.create_portfolio instead")
-
-def get_portfolio_params(strategy_name: str, data, params: dict = None):
-    """DEPRECATED - Use strategy_registry.py"""
-    return {}
-# If you need a list of available strategies, maintain it explicitly or infer from config.
+# To add a new strategy:
+# 1. Create a new file in vectorflow/strategies/ (e.g., my_strategy.py)
+# 2. Implement create_portfolio(data, params) function
+# 3. Add default parameters to config/my_strategy.yaml
+# 4. The strategy will be auto-discovered on next run

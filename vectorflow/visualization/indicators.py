@@ -61,7 +61,8 @@ def add_trade_signals(
     line_width: int = 2,
     profit_color: str = "rgba(0, 255, 0, 0.6)",
     loss_color: str = "rgba(255, 0, 0, 0.6)",
-    show_markers: bool = False,
+    show_markers: bool = True,
+    show_direction: bool = True,
     start_date: Optional[Union[str, pd.Timestamp]] = None,
     end_date: Optional[Union[str, pd.Timestamp]] = None,
     **kwargs,
@@ -70,6 +71,7 @@ def add_trade_signals(
     Add profit/loss colored connector lines between trade entry/exit points.
 
     Green lines for profitable trades, red lines for losses.
+    Direction markers show long (▲) vs short (▼) entries.
 
     Args:
         portfolio: VectorBT Portfolio object
@@ -77,7 +79,8 @@ def add_trade_signals(
         line_width: Width of connector lines (default: 2)
         profit_color: Color for profitable trades (default: green)
         loss_color: Color for losing trades (default: red)
-        show_markers: Show entry/exit markers (default: False)
+        show_markers: Show entry/exit markers (default: True)
+        show_direction: Show long/short direction markers (default: True)
         start_date: Optional start date filter
         end_date: Optional end date filter
 
@@ -111,6 +114,7 @@ def add_trade_signals(
 
     # Plot trades
     entry_dates, entry_prices, exit_dates, exit_prices = [], [], [], []
+    long_entries, short_entries = [], []
 
     for idx in range(len(trades_df)):
         trade = trades_df.iloc[idx]
@@ -133,6 +137,16 @@ def add_trade_signals(
         exit_dates.append(wrapper.index[exit_idx])
         entry_prices.append(entry_price)
         exit_prices.append(exit_price)
+
+        # Determine trade direction (long vs short)
+        # VectorBT uses 'size' - positive for long, negative for short
+        size = trade.get("size", 0)
+        is_long = size > 0 if size != 0 else True  # Default to long if unclear
+        
+        if is_long:
+            long_entries.append((wrapper.index[entry_idx], entry_price))
+        else:
+            short_entries.append((wrapper.index[entry_idx], entry_price))
 
         # Color by PnL
         pnl = trade.get("pnl", exit_price - entry_price)
@@ -177,5 +191,36 @@ def add_trade_signals(
             row=1,
             col=1,
         )
+
+    # Direction markers: ▲ for long, ▼ for short
+    if show_direction:
+        if long_entries:
+            long_x, long_y = zip(*long_entries)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(long_x),
+                    y=list(long_y),
+                    mode="markers",
+                    marker=dict(color="#00E396", size=10, symbol="triangle-up"),
+                    name="Long",
+                    hovertemplate="Long Entry<br>Price: %{y:.2f}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+        if short_entries:
+            short_x, short_y = zip(*short_entries)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(short_x),
+                    y=list(short_y),
+                    mode="markers",
+                    marker=dict(color="#FF4560", size=10, symbol="triangle-down"),
+                    name="Short",
+                    hovertemplate="Short Entry<br>Price: %{y:.2f}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
 
     return fig

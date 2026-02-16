@@ -129,7 +129,7 @@ def print_validation_results(
     has_info = len(validation["info"]) > 0
 
     if not (has_errors or has_warnings or has_info):
-        print(f"✅ Config validation passed for '{strategy_name}'")
+        print(f"[OK] Config validation passed for '{strategy_name}'")
         return True
 
     print(f"\n{'=' * SEPARATOR_WIDTH}")
@@ -137,19 +137,19 @@ def print_validation_results(
     print(f"{'=' * SEPARATOR_WIDTH}")
 
     if validation["errors"]:
-        print("\n❌ ERRORS (must fix):")
+        print("\n[ERRORS] (must fix):")
         for error in validation["errors"]:
-            print(f"   • {error}")
+            print(f"   - {error}")
 
     if validation["warnings"]:
-        print("\n⚠️  WARNINGS (should review):")
+        print("\n[WARNINGS] (should review):")
         for warning in validation["warnings"]:
-            print(f"   • {warning}")
+            print(f"   - {warning}")
 
     if validation["info"]:
-        print("\n💡 INFO:")
+        print("\n[INFO]:")
         for info in validation["info"]:
-            print(f"   • {info}")
+            print(f"   - {info}")
 
     print(f"{'=' * SEPARATOR_WIDTH}\n")
 
